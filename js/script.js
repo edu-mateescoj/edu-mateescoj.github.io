@@ -27,8 +27,8 @@ function showAnswers() {
   });
 }
 
-// Assurer que le DOM est complètement chargé avant d'ajouter les écouteurs d'événements
-document.addEventListener('DOMContentLoaded', (event) => {
-  // Ajouter l'écouteur d'événement pour le bouton si nécessaire
-  // document.querySelector('button').addEventListener('click', verifyAnswers);
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('verify-button').addEventListener('click', verifyAnswers);
+    document.getElementById('show-button').addEventListener('click', showAnswers);
 });
+
