@@ -22,3 +22,9 @@ function showAnswers() {
     input.style.backgroundColor = 'lightgray';
   });
 }
+
+// Assurer que le DOM est complètement chargé avant d'ajouter les écouteurs d'événements
+document.addEventListener('DOMContentLoaded', (event) => {
+  // Ajouter l'écouteur d'événement pour le bouton si nécessaire
+  // document.querySelector('button').addEventListener('click', verifyAnswers);
+});
