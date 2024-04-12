@@ -1,4 +1,6 @@
 function verifyAnswers() {
+  //astuce débogage
+  console.log('Vérification des réponses...');
   // Réponses attendues
   const correctAnswers = { 'v1-answer': '2', 'r-answer': '2', 'v3-answer': '4' };
 
