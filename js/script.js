@@ -1,13 +1,15 @@
 function verifyAnswers() {
   // Réponses attendues
-  const correctAnswers = { v1: '2', r: '2', v3: '4' };
-  
+  const correctAnswers = { 'v1-answer': '2', 'r-answer': '2', 'v3-answer': '4' };
+
   // Vérification des réponses de l'utilisateur
-  document.querySelectorAll('input[type=text]').forEach(input => {
-    const isCorrect = input.value === correctAnswers[input.id.split('-')[0]];
-    input.style.backgroundColor = isCorrect ? 'lightgreen' : 'salmon';
+  Object.keys(correctAnswers).forEach(id => {
+    const userAnswer = document.getElementById(id).value;
+    const isCorrect = userAnswer === correctAnswers[id];
+    document.getElementById(id).style.backgroundColor = isCorrect ? 'lightgreen' : 'salmon';
   });
 }
+
 
 function showAnswers() {
   // Afficher les bonnes réponses
