@@ -14,6 +14,8 @@ function verifyAnswers() {
 
 
 function showAnswers() {
+  //astuce débogage
+  console.log('Appel de la fonction...');
   // Afficher les bonnes réponses
   document.getElementById('v1-answer').value = '2';
   document.getElementById('r-answer').value = '2';
