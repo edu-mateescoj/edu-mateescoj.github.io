@@ -1,3 +1,41 @@
+// Ajoutez le contenu de data.js ici ou assurez-vous qu'il est chargé avant ce script
+// Assumons que data.js contient variableNamesWithTypes
+
+function generateDynamicExercise() {
+    const variables = Object.keys(variableNamesWithTypes.anglais);
+    let selectedVariables = [];
+    while (selectedVariables.length < 3) {
+        let randomVariable = variables[Math.floor(Math.random() * variables.length)];
+        if (!selectedVariables.includes(randomVariable)) {
+            selectedVariables.push(randomVariable);
+        }
+    }
+
+    let expressions = [];
+    selectedVariables.forEach((variable, index) => {
+        let value = Math.floor(Math.random() * 10) + 1; // assure des valeurs > 0
+        expressions.push(`${variable} = ${value}`);
+    });
+
+    // Affiche les expressions générées
+    document.getElementById('code-display').textContent = expressions.join('\n');
+}
+
+function verifyAnswers() {
+    // Exemple simple de vérification des réponses
+    let answers = {
+        "v1": document.getElementById('v1-answer').value,
+        "r": document.getElementById('r-answer').value,
+        "v3": document.getElementById('v3-answer').value
+    };
+
+    let feedback = "Vérification non implémentée."; // Vous devez implémenter la logique basée sur le dernier exercice généré.
+    document.getElementById('feedback').textContent = feedback;
+}
+
+// Appel initial pour configurer un exercice par défaut
+generateDynamicExercise();
+
 function verifyAnswers() {
   //astuce débogage
   console.log('Vérification des réponses...');
