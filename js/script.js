@@ -1,27 +1,34 @@
-// Ajoutez le contenu de data.js ici ou assurez-vous qu'il est chargé avant ce script
-// Assumons que data.js contient variableNamesWithTypes
-
 function generateDynamicExercise() {
-    const variables = Object.keys(variableNamesWithTypes.anglais);
+    const variableNames = Object.keys(variableNamesWithTypes.anglais);
     let selectedVariables = [];
     while (selectedVariables.length < 3) {
-        let randomVariable = variables[Math.floor(Math.random() * variables.length)];
-        if (!selectedVariables.includes(randomVariable)) {
-            selectedVariables.push(randomVariable);
+        const randomIndex = Math.floor(Math.random() * variableNames.length);
+        const variable = variableNames[randomIndex];
+        if (!selectedVariables.includes(variable)) {
+            selectedVariables.push(variable);
         }
     }
-
+    // Définir des valeurs initiales aléatoires
     let expressions = [];
+    currentCorrectAnswers = {}; // Réinitialiser les réponses correctes
+
     selectedVariables.forEach((variable, index) => {
-        let value = Math.floor(Math.random() * 10) + 1; // assure des valeurs > 0
+        let value = Math.floor(Math.random() * 10) + 1; // Valeurs aléatoires pour l'exemple
         expressions.push(`${variable} = ${value}`);
+        currentCorrectAnswers[`${variable}-answer`] = value.toString(); // Sauvegarde des réponses correctes
     });
 
-    // Affiche les expressions générées
+    // Affichage des expressions générées
     document.getElementById('code-display').textContent = expressions.join('\n');
 }
 
+// Appel initial pour configurer un exercice par défaut
+generateDynamicExercise();
+
+
 function verifyAnswers() {
+  //astuce débogage
+  console.log('Vérification des réponses...');
     // Exemple simple de vérification des réponses
     let answers = {
         "v1": document.getElementById('v1-answer').value,
@@ -32,10 +39,7 @@ function verifyAnswers() {
     let feedback = "Vérification non implémentée."; // Vous devez implémenter la logique basée sur le dernier exercice généré.
     document.getElementById('feedback').textContent = feedback;
 }
-
-// Appel initial pour configurer un exercice par défaut
-generateDynamicExercise();
-
+/*
 function verifyAnswers() {
   //astuce débogage
   console.log('Vérification des réponses...');
@@ -49,7 +53,7 @@ function verifyAnswers() {
     document.getElementById(id).style.backgroundColor = isCorrect ? 'lightgreen' : 'salmon';
   });
 }
-
+*/
 
 function showAnswers() {
   //astuce débogage
@@ -68,5 +72,7 @@ function showAnswers() {
 document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('verify-button').addEventListener('click', verifyAnswers);
     document.getElementById('show-button').addEventListener('click', showAnswers);
+    document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
+    generateDynamicExercise(); // Générer un premier exercice au chargement
 });
 
