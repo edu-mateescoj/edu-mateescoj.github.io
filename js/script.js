@@ -47,8 +47,20 @@ function verifyAnswers() {
         "v3": document.getElementById('v3-answer').value
     };
 
-    let feedback = "Vérification non implémentée."; // Vous devez implémenter la logique basée sur le dernier exercice généré.
-    document.getElementById('feedback').textContent = feedback;
+    // Itération sur chaque réponse pour vérifier et appliquer la couleur appropriée
+    Object.keys(answers).forEach(id => {
+        const userAnswer = answers[id];
+        const correctAnswer = currentCorrectAnswers[id];
+        const inputElement = document.getElementById(id);
+
+        if (userAnswer === "") {
+            inputElement.style.backgroundColor = ""; // Pas de coloration si pas de réponse
+        } else if (userAnswer === correctAnswer) {
+            inputElement.style.backgroundColor = 'lightgreen'; // Vert si correct
+        } else {
+            inputElement.style.backgroundColor = 'salmon'; // Rouge si incorrect
+        }
+    });
 }
 /*
 function verifyAnswers() {
