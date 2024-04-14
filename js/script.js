@@ -11,7 +11,12 @@ function generateDynamicExercise() {
     // Définir des valeurs initiales aléatoires
     let expressions = [];
     currentCorrectAnswers = {}; // Réinitialiser les réponses correctes
-
+    /* méthode forEach ... explications ci-dessous
+    variable : chaque variable sélectionnée de selectedVariables.
+    index : indice de l'élément courant dans le tableau selectedVariables. Cet index sera utilisé pour :
+Accéder aux identifiants correspondants des champs de saisie (inputId) et des labels (labelId) qui sont stockés dans des tableaux séparés. 
+Ces tableaux sont indexés de la même manière que selectedVariables, donc l'index de chaque variable dans selectedVariables correspond à l'index de son ID dans la liste des id d'input et dans celle des id de label.
+Assigner dynamiquement les placeholders et les labels pour chaque champ d'input selon la variable traitée.*/
     selectedVariables.forEach((variable, index) => {
         let value = Math.floor(Math.random() * 10) + 1; // Valeurs aléatoires pour l'exemple
         expressions.push(`${variable} = ${value}`);
