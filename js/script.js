@@ -22,7 +22,7 @@ Assigner dynamiquement les placeholders et les labels pour chaque champ d'input 
     ['v1-answer', 'r-answer', 'v3-answer'].forEach(inputId => {
         const inputElement = document.getElementById(inputId);
         if (inputElement) {
-            inputElement.value = ""; // Réinitialisation de la valeur
+            inputElement.value = ""; // Réinitialisation : j'écrase la valeur
             inputElement.style.backgroundColor = ""; // Réinitialisation de la couleur de fond
         }
     });
