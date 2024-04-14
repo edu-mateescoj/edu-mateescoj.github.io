@@ -17,6 +17,16 @@ function generateDynamicExercise() {
 Accéder aux identifiants correspondants des champs de saisie (inputId) et des labels (labelId) qui sont stockés dans des tableaux séparés. 
 Ces tableaux sont indexés de la même manière que selectedVariables, donc l'index de chaque variable dans selectedVariables correspond à l'index de son ID dans la liste des id d'input et dans celle des id de label.
 Assigner dynamiquement les placeholders et les labels pour chaque champ d'input selon la variable traitée.*/
+    
+    // Réinitialiser les valeurs et la couleur des inputs avant de générer de nouveaux exercices
+    ['v1-answer', 'r-answer', 'v3-answer'].forEach(inputId => {
+        const inputElement = document.getElementById(inputId);
+        if (inputElement) {
+            inputElement.value = ""; // Réinitialisation de la valeur
+            inputElement.style.backgroundColor = ""; // Réinitialisation de la couleur de fond
+        }
+    });
+    
     selectedVariables.forEach((variable, index) => {
         let value = Math.floor(Math.random() * 10) + 1; // Valeurs aléatoires pour l'exemple
         expressions.push(`${variable} = ${value}`);
