@@ -42,9 +42,9 @@ function verifyAnswers() {
   console.log('Vérification des réponses...');
     // Exemple simple de vérification des réponses
     let answers = {
-        "v1": document.getElementById('v1-answer').value,
-        "r": document.getElementById('r-answer').value,
-        "v3": document.getElementById('v3-answer').value
+        "v1-answer": document.getElementById('v1-answer').value,
+        "r-answer": document.getElementById('r-answer').value,
+        "v3-answer": document.getElementById('v3-answer').value
     };
 
     // Itération sur chaque réponse pour vérifier et appliquer la couleur appropriée
