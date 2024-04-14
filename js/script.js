@@ -16,6 +16,12 @@ function generateDynamicExercise() {
         let value = Math.floor(Math.random() * 10) + 1; // Valeurs aléatoires pour l'exemple
         expressions.push(`${variable} = ${value}`);
         currentCorrectAnswers[`${variable}-answer`] = value.toString(); // Sauvegarde des réponses correctes
+       
+        // Mise à jour des placeholders et des labels
+        const inputId = ['v1-answer', 'r-answer', 'v3-answer'][index];
+        const labelId = ['labelA', 'labelB', 'labelC'][index];
+        document.getElementById(inputId).placeholder = `Valeur de ${variable}`;
+        document.getElementById(labelId).textContent = `Valeur de ${variable} :`;
     });
 
     // Affichage des expressions générées
