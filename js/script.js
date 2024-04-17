@@ -97,7 +97,6 @@ function showAnswers() {
         inputElement.value = currentCorrectAnswers[id]; // Utiliser la valeur correcte stockée
         inputElement.style.backgroundColor = 'lightgray'; // Réinitialiser la couleur de fond
     });
-}
   // Réinitialiser la couleur de fond des réponses
   document.querySelectorAll('input[type=text]').forEach(input => {
     input.style.backgroundColor = 'lightgray';
