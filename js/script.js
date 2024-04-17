@@ -13,10 +13,11 @@ function generateDynamicExercise() {
     currentCorrectAnswers = {}; // Réinitialiser les réponses correctes
     /* méthode forEach ... explications ci-dessous
     variable : chaque variable sélectionnée de selectedVariables.
-    index : indice de l'élément courant dans le tableau selectedVariables. Cet index sera utilisé pour :
-Accéder aux identifiants correspondants des champs de saisie (inputId) et des labels (labelId) qui sont stockés dans des tableaux séparés. 
-Ces tableaux sont indexés de la même manière que selectedVariables, donc l'index de chaque variable dans selectedVariables correspond à l'index de son ID dans la liste des id d'input et dans celle des id de label.
-Assigner dynamiquement les placeholders et les labels pour chaque champ d'input selon la variable traitée.*/
+    index : indice de l'élément courant dans le tableau selectedVariables. Cet index sera utilisé pour accéder aux 
+    identifiants correspondants des champs de saisie (inputId) et des labels (labelId) qui sont stockés dans des 
+tableaux séparés. Ces tableaux sont indexés de la même manière que selectedVariables, donc l'index de chaque variable dans 
+selectedVariables correspond à l'index de son ID dans la liste des id d'input et dans celle des id de label.
+Il faut assigner dynamiquement les placeholders et les labels pour chaque champ d'input selon la variable traitée.*/
     
     // Réinitialiser les valeurs et la couleur des inputs avant de générer de nouveaux exercices
     ['v1-answer', 'r-answer', 'v3-answer'].forEach(inputId => {
@@ -31,7 +32,7 @@ Assigner dynamiquement les placeholders et les labels pour chaque champ d'input 
         let value = Math.floor(Math.random() * 10) + 1; // Valeurs aléatoires pour l'exemple
         expressions.push(`${variable} = ${value}`);
         const inputId = ['v1-answer', 'r-answer', 'v3-answer'][index];
-        currentCorrectAnswers[inputID] = value.toString(); // Sauvegarde des réponses correctes
+        currentCorrectAnswers[inputId] = value.toString(); // Sauvegarde des réponses correctes
        
         // Mise à jour des placeholders et des labels
        
