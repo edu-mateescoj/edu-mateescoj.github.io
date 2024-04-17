@@ -83,15 +83,21 @@ function verifyAnswers() {
   });
 }
 */
-
-function showAnswers() {
-  //astuce débogage
-  console.log('Appel de la fonction...');
-  // Afficher les bonnes réponses
+/*
   document.getElementById('v1-answer').value = '2';
   document.getElementById('r-answer').value = '2';
   document.getElementById('v3-answer').value = '4';
-
+  */
+function showAnswers() {
+  //astuce débogage
+  console.log('Appel de la fonction...');
+  // Utilise currentCorrectAnswers pour afficher les bonnes réponses
+    Object.keys(currentCorrectAnswers).forEach(id => {
+        const inputElement = document.getElementById(id);
+        inputElement.value = currentCorrectAnswers[id]; // Utiliser la valeur correcte stockée
+        inputElement.style.backgroundColor = 'lightgray'; // Réinitialiser la couleur de fond
+    });
+}
   // Réinitialiser la couleur de fond des réponses
   document.querySelectorAll('input[type=text]').forEach(input => {
     input.style.backgroundColor = 'lightgray';
