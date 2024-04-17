@@ -20,7 +20,7 @@ selectedVariables correspond à l'index de son ID dans la liste des id d'input e
 Il faut assigner dynamiquement les placeholders et les labels pour chaque champ d'input selon la variable traitée.*/
     
     // Réinitialiser les valeurs et la couleur des inputs avant de générer de nouveaux exercices
-    ['v1-answer', 'v2-answer', 'v3-answer'].forEach(inputId => {
+    ['v1-answer', 'r-answer', 'v3-answer'].forEach(inputId => {
         const inputElement = document.getElementById(inputId);
         if (inputElement) {
             inputElement.value = ""; // Réinitialisation : j'écrase la valeur
@@ -31,7 +31,7 @@ Il faut assigner dynamiquement les placeholders et les labels pour chaque champ 
     selectedVariables.forEach((variable, index) => {
         let value = Math.floor(Math.random() * 10) + 1; // Valeurs aléatoires pour l'exemple
         expressions.push(`${variable} = ${value}`);
-        const inputId = ['v1-answer', 'v2-answer', 'v3-answer'][index];
+        const inputId = ['v1-answer', 'r-answer', 'v3-answer'][index];
         currentCorrectAnswers[inputId] = value.toString(); // Sauvegarde des réponses correctes
        
         // Mise à jour des placeholders et des labels
@@ -55,7 +55,7 @@ function verifyAnswers() {
     // Exemple simple de vérification des réponses
     let answers = {
         "v1-answer": document.getElementById('v1-answer').value,
-        "v2-answer": document.getElementById('v2-answer').value,
+        "r-answer": document.getElementById('r-answer').value,
         "v3-answer": document.getElementById('v3-answer').value
     };
 
@@ -79,7 +79,7 @@ function verifyAnswers() {
   //astuce débogage
   console.log('Vérification des réponses...');
   // Réponses attendues
-  const correctAnswers = { 'v1-answer': '2', 'v2-answer': '2', 'v3-answer': '4' };
+  const correctAnswers = { 'v1-answer': '2', 'r-answer': '2', 'v3-answer': '4' };
 
   // Vérification des réponses de l'utilisateur
   Object.keys(correctAnswers).forEach(id => {
@@ -95,7 +95,7 @@ function showAnswers() {
   console.log('Appel de la fonction...');
   // Afficher les bonnes réponses
   document.getElementById('v1-answer').value = '2';
-  document.getElementById('v2-answer').value = '2';
+  document.getElementById('r-answer').value = '2';
   document.getElementById('v3-answer').value = '4';
 
   // Réinitialiser la couleur de fond des réponses
