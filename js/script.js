@@ -92,11 +92,11 @@ function verifyAnswers() {
 
 function showAnswers() {
   //astuce débogage
-  console.log('Appel de la fonction...');
+  console.log('Affichage des réponses correctes...');
   // Afficher les bonnes réponses
-  document.getElementById('v1-answer').value = '2';
-  document.getElementById('r-answer').value = '2';
-  document.getElementById('v3-answer').value = '4';
+  Object.keys(currentCorrectAnswers).forEach(id => {
+        const inputElement = document.getElementById(id);
+        inputElement.value = currentCorrectAnswers[id];
 
   // Réinitialiser la couleur de fond des réponses
   document.querySelectorAll('input[type=text]').forEach(input => {
