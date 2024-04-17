@@ -75,12 +75,6 @@ function verifyAnswers() {
     });
 }
 /*
-function verifyAnswers() {
-  //astuce débogage
-  console.log('Vérification des réponses...');
-  // Réponses attendues
-  const correctAnswers = { 'v1-answer': '2', 'r-answer': '2', 'v3-answer': '4' };
-
   // Vérification des réponses de l'utilisateur
   Object.keys(correctAnswers).forEach(id => {
     const userAnswer = document.getElementById(id).value;
@@ -92,11 +86,11 @@ function verifyAnswers() {
 
 function showAnswers() {
   //astuce débogage
-  console.log('Affichage des réponses correctes...');
+  console.log('Appel de la fonction...');
   // Afficher les bonnes réponses
-  Object.keys(currentCorrectAnswers).forEach(id => {
-        const inputElement = document.getElementById(id);
-        inputElement.value = currentCorrectAnswers[id];
+  document.getElementById('v1-answer').value = '2';
+  document.getElementById('r-answer').value = '2';
+  document.getElementById('v3-answer').value = '4';
 
   // Réinitialiser la couleur de fond des réponses
   document.querySelectorAll('input[type=text]').forEach(input => {
@@ -110,4 +104,3 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
     generateDynamicExercise(); // Générer un premier exercice au chargement
 });
-
