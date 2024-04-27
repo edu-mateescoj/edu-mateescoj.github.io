@@ -1,4 +1,5 @@
-function generateDynamicExercise() {
+/*
+    function generateDynamicExercise() {
     const variableNames = Object.keys(variableNamesWithTypes.anglais);
     let selectedVariables = [];
     while (selectedVariables.length < 3) {
@@ -20,6 +21,7 @@ selectedVariables correspond à l'index de son ID dans la liste des id d'input e
 Il faut assigner dynamiquement les placeholders et les labels pour chaque champ d'input selon la variable traitée.*/
     
     // Réinitialiser les valeurs et la couleur des inputs avant de générer de nouveaux exercices
+/*
     ['v1-answer', 'r-answer', 'v3-answer'].forEach(inputId => {
         const inputElement = document.getElementById(inputId);
         if (inputElement) {
@@ -87,7 +89,7 @@ function verifyAnswers() {
   document.getElementById('v1-answer').value = '2';
   document.getElementById('r-answer').value = '2';
   document.getElementById('v3-answer').value = '4';
-  */
+
 function showAnswers() {
   //astuce débogage
   console.log('Appel de la fonction...');
@@ -109,3 +111,4 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
     generateDynamicExercise(); // Générer un premier exercice au chargement
 });
+*/
