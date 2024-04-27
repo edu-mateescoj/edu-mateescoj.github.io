@@ -31,8 +31,10 @@
     <!-- Inclure le script JavaScript à la fin du body pour un chargement efficace -->
     <!-- <script src="js/script.js"></script> -->
     <script>
-        function generateDynamicExercise() {
-    const variableNames = Object.keys(variableNamesWithTypes.anglais);
+    function generateDynamicExercise() {
+      //astuce débogage
+      console.log('Génère exo...');
+        const variableNames = Object.keys(variableNamesWithTypes.anglais);
     let selectedVariables = [];
     while (selectedVariables.length < 3) {
         const randomIndex = Math.floor(Math.random() * variableNames.length);
