@@ -106,7 +106,7 @@
             const variable = variableNames[randomIndex];
             if (!selectedVariables.includes(variable)) {
                 selectedVariables.push(variable);
-                variables[variable] = Math.floor(Math.random() * 50) + 1;
+                variables[variable] = Math.floor(Math.random() * 20) + 1;
                 expressions.push(`${variable} = ${variables[variable]}`);
             }
         }
@@ -132,7 +132,7 @@
             errorCheckbox.id = errorCheckboxId;
             const errorLabel = document.createElement('label');
             errorLabel.htmlFor = errorCheckboxId;
-            errorLabel.textContent = " Erreur de division par zéro?";
+            errorLabel.textContent = " Erreur ?";
 
             inputGroup.appendChild(labelElement);
             inputGroup.appendChild(inputElement);
