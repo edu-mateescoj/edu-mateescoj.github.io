@@ -101,16 +101,18 @@
         let expressions = [];
         currentCorrectAnswers = {};
 
+        // Initialize variables with appropriate types and values
         while (selectedVariables.length < numVariables) {
             const randomIndex = Math.floor(Math.random() * variableNames.length);
             const variable = variableNames[randomIndex];
             if (!selectedVariables.includes(variable)) {
                 selectedVariables.push(variable);
-                variables[variable] = Math.floor(Math.random() * 20) + 1;
-                expressions.push(`${variable} = ${variables[variable]}`);
+                variables[variable] = initializeVariable(variableNamesWithTypes.anglais[variable]);
+                expressions.push(`${variable} = ${formatValueForDisplay(variables[variable])}`);
             }
         }
 
+        // Generate expressions respecting variable types
         selectedVariables.forEach((variable, index) => {
             const inputId = `inputValue${index + 1}`;
             const errorCheckboxId = `errorCheckbox${index + 1}`;
@@ -132,7 +134,7 @@
             errorCheckbox.id = errorCheckboxId;
             const errorLabel = document.createElement('label');
             errorLabel.htmlFor = errorCheckboxId;
-            errorLabel.textContent = " Erreur ?";
+            errorLabel.textContent = "Erreur de division par zéro?";
 
             inputGroup.appendChild(labelElement);
             inputGroup.appendChild(inputElement);
@@ -141,45 +143,80 @@
 
             container.appendChild(inputGroup);
 
-            const otherVariables = selectedVariables.filter(v => v !== variable);
-            const otherVariable = otherVariables[Math.floor(Math.random() * otherVariables.length)];
-            const operator = variableNamesWithTypes.operators.arithmetique[Math.floor(Math.random() * variableNamesWithTypes.operators.arithmetique.length)];
-            const randomValue = Math.floor(Math.random() * 21) - 10;
-            let expression, evalResult;
+            // Generate logical or arithmetic expressions based on variable type
+            const isBoolean = variableNamesWithTypes.anglais[variable] === "boolean";
+            const operatorSet = isBoolean ? variableNamesWithTypes.operators.logique : variableNamesWithTypes.operators.arithmetique;
+            const operator = operatorSet[Math.floor(Math.random() * operatorSet.length)];
+            let otherVariable, expression, evalResult;
 
-            if (Math.random() < 0.8 && otherVariables.length > 0) {
-                // 80% chance to depend on another variable
-                expression = `${variable} = ${variable} ${operator} ${otherVariable}`;
-                evalResult = evaluateExpression(variables[variable], variables[otherVariable], operator);
+            if (isBoolean && operator === "not") {
+                expression = `${variable} = not ${variable}`;
+                evalResult = !variables[variable];
             } else {
-                // 20% chance to depend on a numeric value
-                expression = `${variable} = ${variable} ${operator} ${randomValue}`;
-                evalResult = evaluateExpression(variables[variable], randomValue, operator);
+                otherVariable = selectAppropriateVariable(selectedVariables, variables, variable, isBoolean);
+                const valueToUse = otherVariable ? variables[otherVariable] : getRandomBoolean();
+                expression = `${variable} = ${variable} ${operator} ${formatValueForDisplay(valueToUse)}`;
+                evalResult = evaluateExpression(variables[variable], valueToUse, operator);
             }
 
             expressions.push(expression);
             variables[variable] = evalResult;
-            currentCorrectAnswers[inputId] = typeof evalResult === 'number' ? evalResult.toString() : "Error: Division by zero";
+            currentCorrectAnswers[inputId] = typeof evalResult === 'boolean' ? formatValueForDisplay(evalResult) : evalResult.toString();
         });
 
         display.textContent = expressions.join('\n');
     }
 
+    function initializeVariable(type) {
+        switch(type) {
+            case "integer":
+            case "float":
+            case "string": //on verra plus tard pour les op sur string
+                return Math.floor(Math.random() * 21) - 10;
+            case "boolean":
+                return Math.random() < 0.5;
+            default:
+                return null; // This should not happen
+        }
+    }
+
+    function formatValueForDisplay(value) {
+        if (typeof value === 'boolean') {
+            return value ? "True" : "False";
+        }
+        return value;
+    }
+
+    function selectAppropriateVariable(variables, values, currentVariable, isBoolean) {
+        return variables.filter(v => v !== currentVariable && typeof values[v] === (isBoolean ? 'boolean' : 'number'))[0];
+    }
+
+    function getRandomBoolean() {
+        return Math.random() < 0.5;
+    }
+
     function evaluateExpression(left, right, operator) {
         try {
-            if (operator === "//") {
-                if (right === 0) {
-                    return "Error: Division by zero";
-                }
-                return Math.floor(left / right);
-                } else if (operator === "%") {
-                    if (right === 0) {
-                        return "Error: Division by zero";
-                    }
-                    return left % right;
-            } else {
+            switch(operator) {
+            case "and":
+                return left && right;
+            case "or":
+                return left || right;
+            case "not":
+                return !left; // This should be handled outside since it's unary
+            case "+":
+            case "-":
+            case "*":
                 return eval(`${left} ${operator} ${right}`);
-            }
+            case "//":
+                if (right === 0) return "Error: Division by zero";
+                return Math.floor(left / right);
+            case "%":
+                if (right === 0) return "Error: Division by zero";
+                return left % right;
+            default:
+                return eval(`${left} ${operator} ${right}`);
+        }
         } catch (e) {
             console.error('oups...:', e.message);
             return "Error: Invalid expression";
