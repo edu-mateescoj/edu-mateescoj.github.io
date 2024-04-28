@@ -3,33 +3,230 @@
 <head>
     <meta charset="UTF-8">
     <title>Exerciseur Python</title>
-    <link rel="stylesheet" href="css/style.css"> <!-- Lien vers la feuille de style externe -->
+    <style>
+        .exercise-container {
+            margin: auto;
+            width: 50%;
+            border: 1px solid #ddd;
+            padding: 20px;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        input[type="text"], input[type="range"] {
+            padding: 10px;
+            margin-right: 5px; /* Spacing between input and checkbox */
+            flex: 1 0 auto;
+        }
+        input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        button {
+            padding: 10px 15px;
+            margin-right: 5px;
+            border: none;
+            background-color: #5cb85c;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+        pre {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 10px;
+        }
+        label {
+            margin-right: 10px; /* Ensure spacing */
+        }
+    </style>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
 </head>
 <body>
     <div class="exercise-container">
         <h2>Exercices automatiques d'assignation de variables (en construction...)</h2>
         <p>Que valent les variables à la fin de l'exécution du code Python ci-dessous ?</p>
-        
         <pre id="code-display">Exemple de code</pre>
-        
-        <label for="v1-answer" id="labelA">Valeur de :</label>
-        <input type="text" id="v1-answer" placeholder="Valeur de v1">
-        
-        <label for="r-answer" id="labelB">Valeur de :</label>
-        <input type="text" id="r-answer" placeholder="Valeur de r">
-        
-        <label for="v3-answer" id="labelC">Valeur de :</label>
-        <input type="text" id="v3-answer" placeholder="Valeur de v3">
+
+        <label for="numVariables">Nombre de variables (2 à 5):</label>
+        <input type="range" id="numVariables" min="2" max="5" value="3" oninput="updateVariableCount(value)">
+        <span id="variableCount">3</span>
         
         <button id="verify-button">Vérifier</button>
         <button id="show-button">Montrer les réponses</button>
-        <button id="generate-button" onclick="generateDynamicExercise()">Générer un nouvel exercice</button>
+        <button id="generate-button">Générer un nouvel exercice</button>
     </div>
+    <script>
+    const variableNamesWithTypes = {
+        anglais: {
+            age: "integer", name: "string", userScore: "integer", count: "integer",
+            total: "float", sum: "float", product: "float", average: "float",
+            max: "float", min: "float", height: "float", width: "float",
+            length: "float", size: "integer", position: "integer", status: "string",
+            color: "string", date: "string", flag: "boolean", isActive: "boolean",
+            hasItems: "boolean", isVisible: "boolean"
+        },
+        operators: {
+            arithmetique: ["+", "-", "*", "//", "%"],
+            logique: ["and", "or", "not"]
+        }
+    };
 
-    <!-- inclure les data avant le script !! -->
-    <script src="js/data.js"></script>
-    <!-- Inclure le script JavaScript à la fin du body pour un chargement efficace -->
-    <script src="js/script.js"></script>
+    let numVariables = 3; // Default number of variables
+
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
+        document.getElementById('verify-button').addEventListener('click', verifyAnswers);
+        document.getElementById('show-button').addEventListener('click', showAnswers);
+        generateDynamicExercise(); // Initial call to populate the exercise
+    });
+
+    function updateVariableCount(value) {
+        document.getElementById('variableCount').textContent = value;
+        numVariables = parseInt(value);
+    }
+
+    function generateDynamicExercise() {
+        const container = document.querySelector('.exercise-container');
+        const display = document.getElementById('code-display');
+        container.querySelectorAll('.input-group').forEach(el => el.remove());
+
+        const variableNames = Object.keys(variableNamesWithTypes.anglais);
+        let selectedVariables = [];
+        let variables = {};
+        let expressions = [];
+        currentCorrectAnswers = {};
+
+        while (selectedVariables.length < numVariables) {
+            const randomIndex = Math.floor(Math.random() * variableNames.length);
+            const variable = variableNames[randomIndex];
+            if (!selectedVariables.includes(variable)) {
+                selectedVariables.push(variable);
+                variables[variable] = Math.floor(Math.random() * 50) + 1;
+                expressions.push(`${variable} = ${variables[variable]}`);
+            }
+        }
+
+        selectedVariables.forEach((variable, index) => {
+            const inputId = `inputValue${index + 1}`;
+            const errorCheckboxId = `errorCheckbox${index + 1}`;
+
+            const inputGroup = document.createElement('div');
+            inputGroup.className = 'input-group';
+
+            const labelElement = document.createElement('label');
+            labelElement.htmlFor = inputId;
+            labelElement.textContent = `Valeur finale de ${variable}:`;
+
+            const inputElement = document.createElement('input');
+            inputElement.type = 'text';
+            inputElement.id = inputId;
+            inputElement.placeholder = `Valeur finale de ${variable}`;
+
+            const errorCheckbox = document.createElement('input');
+            errorCheckbox.type = 'checkbox';
+            errorCheckbox.id = errorCheckboxId;
+            const errorLabel = document.createElement('label');
+            errorLabel.htmlFor = errorCheckboxId;
+            errorLabel.textContent = " Erreur ?";
+
+            inputGroup.appendChild(labelElement);
+            inputGroup.appendChild(inputElement);
+            inputGroup.appendChild(errorCheckbox);
+            inputGroup.appendChild(errorLabel);
+
+            container.appendChild(inputGroup);
+
+            const otherVariables = selectedVariables.filter(v => v !== variable);
+            const otherVariable = otherVariables[Math.floor(Math.random() * otherVariables.length)];
+            const operator = variableNamesWithTypes.operators.arithmetique[Math.floor(Math.random() * variableNamesWithTypes.operators.arithmetique.length)];
+            const randomValue = Math.floor(Math.random() * 21) - 10;
+            let expression, evalResult;
+
+            if (Math.random() < 0.8 && otherVariables.length > 0) {
+                // 80% chance to depend on another variable
+                expression = `${variable} = ${variable} ${operator} ${otherVariable}`;
+                evalResult = evaluateExpression(variables[variable], variables[otherVariable], operator);
+            } else {
+                // 20% chance to depend on a numeric value
+                expression = `${variable} = ${variable} ${operator} ${randomValue}`;
+                evalResult = evaluateExpression(variables[variable], randomValue, operator);
+            }
+
+            expressions.push(expression);
+            variables[variable] = evalResult;
+            currentCorrectAnswers[inputId] = typeof evalResult === 'number' ? evalResult.toString() : "Error: Division by zero";
+        });
+
+        display.textContent = expressions.join('\n');
+    }
+
+    function evaluateExpression(left, right, operator) {
+        try {
+            if (operator === "//") {
+                if (right === 0) {
+                    return "Error: Division by zero";
+                }
+                return Math.floor(left / right);
+                } else if (operator === "%") {
+                    if (right === 0) {
+                        return "Error: Division by zero";
+                    }
+                    return left % right;
+            } else {
+                return eval(`${left} ${operator} ${right}`);
+            }
+        } catch (e) {
+            console.error('oups...:', e.message);
+            return "Error: Invalid expression";
+        
+        }
+    }
+
+    function verifyAnswers() {
+    document.querySelectorAll('.input-group').forEach(group => {
+        const input = group.querySelector('input[type="text"]');
+        const errorCheckbox = group.querySelector('input[type="checkbox"]');
+        const userAnswer = input.value.trim();
+        const correctAnswer = currentCorrectAnswers[input.id];
+        
+        if (errorCheckbox.checked){
+            if (correctAnswer === "Error: Division by zero" && userAnswer === "") {
+                input.style.backgroundColor = 'lightgreen';  // Correctly predicted error
+            } else if (correctAnswer === "Error: Division by zero") {   //aurait pas dû rentrer valeur
+                input.style.backgroundColor = '';  // contradiction enter checkBox et valeur
+            } else {
+                input.style.backgroundColor = 'salmon';  // Incorrect answer or error not predicted
+            }}
+            else {
+                if (userAnswer === "") {
+                    input.style.backgroundColor = "";
+                } else if (userAnswer === correctAnswer) {
+                    input.style.backgroundColor = 'lightgreen';  // Correct answer
+                } else {
+                    input.style.backgroundColor = 'salmon';  // Incorrect answer
+                }
+            }
+        });
+    }
+    function showAnswers() {
+        document.querySelectorAll('.input-group').forEach(group => {
+            const input = group.querySelector('input[type="text"]');
+            const errorCheckbox = group.querySelector('input[type="checkbox"]');
+            if (currentCorrectAnswers[input.id].startsWith("Error")) {
+                errorCheckbox.checked = true;
+                input.value = "";  // Clear the input as it's an error
+                input.style.backgroundColor = 'lightgray';
+            } else {
+                input.value = currentCorrectAnswers[input.id];
+                input.style.backgroundColor = 'lightgray';
+            }
+        });
+    }
+    </script>
 </body>
 </html>
