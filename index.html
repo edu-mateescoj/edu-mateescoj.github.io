@@ -14,17 +14,19 @@
         .input-group {
             display: flex;
             align-items: center;
+            justify-content: space-between; /* Assure l'espacement entre les éléments */
             margin-bottom: 10px;
         }
         input[type="text"], input[type="range"] {
             padding: 10px;
             margin-right: 5px; /* Spacing between input and checkbox */
-            flex: 1 0 auto;
+            flex: 1; /* Permet aux inputs de prendre toute la largeur disponible */
+            /*flex: 1 0 auto;*/
         }/*
         input[type="text"] {
             padding: 10px;
             margin-right: 5px;
-            flex: 1 0 auto;
+            /* flex: 1 0 auto;*/
         }
         input [type="range"] {
             padding: 10px;
