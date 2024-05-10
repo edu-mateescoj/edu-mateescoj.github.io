@@ -14,13 +14,43 @@
         .input-group {
             display: flex;
             align-items: center;
+            justify-content: space-between; /* Assure l'espacement entre les éléments */
             margin-bottom: 10px;
         }
         input[type="text"], input[type="range"] {
             padding: 10px;
             margin-right: 5px; /* Spacing between input and checkbox */
-            flex: 1 0 auto;
+            flex: 1; /* Permet aux inputs de prendre toute la largeur disponible */
         }
+        input[type="range"] {
+            -webkit-appearance: none; /* Override default CSS styles */
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #ddd; /* Initial background */
+            outline: none;
+            transition: background 0.3s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+        }
+
         input[type="checkbox"] {
             margin-right: 5px;
         }
@@ -28,10 +58,23 @@
             padding: 10px 15px;
             margin-right: 5px;
             border: none;
-            background-color: #5cb85c;
-            color: white;
             cursor: pointer;
         }
+        .button-new-exercise {
+            background-color: #007BFF; /* Blue for new exercise */
+            color: white;
+        }
+
+        .button-verify {
+            background-color: #28a745; /* Green for verify */
+            color: white;
+        }
+
+        .button-show-answers {
+            background-color: #6c757d; /* Gray for show answers */
+            color: white;
+        }
+
         button:hover {
             opacity: 0.8;
         }
@@ -39,26 +82,28 @@
             background-color: #f8f8f8;
             border: 1px solid #ddd;
             padding: 10px;
+            margin-bottom: 10px; /* Espacement en dessous du bloc de code */
         }
         label {
+            flex: 0 0 20%; /* Alloue 20% de la largeur du conteneur aux labels */
             margin-right: 10px; /* Ensure spacing */
         }
     </style>
-    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="icon" href="C:\Users\julien\Downloads\favicon.ico" type="image/x-icon">
 </head>
 <body>
     <div class="exercise-container">
-        <h2>Exercices automatiques d'assignation de variables (en construction...)</h2>
+        <h2>Exercices automatiques d'assignation de variables</h2>
         <p>Que valent les variables à la fin de l'exécution du code Python ci-dessous ?</p>
         <pre id="code-display">Exemple de code</pre>
 
-        <label for="numVariables">Nombre de variables (2 à 5):</label>
-        <input type="range" id="numVariables" min="2" max="5" value="3" oninput="updateVariableCount(value)">
+        <label for="numVariables">Nombre de variables (1 à 6):</label>
+        <input type="range" id="numVariables" min="1" max="6" value="3" oninput="handleRangeChange(this.value);">
         <span id="variableCount">3</span>
         
-        <button id="verify-button">Vérifier</button>
-        <button id="show-button">Montrer les réponses</button>
-        <button id="generate-button">Générer un nouvel exercice</button>
+        <button id="verify-button" class="button-verify">Vérifier</button>
+        <button id="show-button" class="button-show-answers">Montrer les réponses</button>
+        <button id="generate-button" class="button-new-exercise">Nouvel exercice</button>
     </div>
     <script>
     const variableNamesWithTypes = {
@@ -72,23 +117,43 @@
         },
         operators: {
             arithmetique: ["+", "-", "*", "//", "%"],
-            logique: ["and", "or", "not"]
+            logique: ["and", "or", "not"],
+            comparaison: ["==", "!=", "<", ">", "<=", ">="]
         }
     };
 
     let numVariables = 3; // Default number of variables
 
     document.addEventListener('DOMContentLoaded', function() {
-        document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
-        document.getElementById('verify-button').addEventListener('click', verifyAnswers);
-        document.getElementById('show-button').addEventListener('click', showAnswers);
-        generateDynamicExercise(); // Initial call to populate the exercise
+    document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
+    document.getElementById('verify-button').addEventListener('click', verifyAnswers);
+    document.getElementById('show-button').addEventListener('click', showAnswers);
+    document.getElementById('numVariables').addEventListener('input', function() {
+        handleRangeChange(this.value);
     });
+    generateDynamicExercise(); // Initial call to populate the exercise
+});
 
-    function updateVariableCount(value) {
-        document.getElementById('variableCount').textContent = value;
-        numVariables = parseInt(value);
-    }
+function updateVariableCount(value) {
+    document.getElementById('variableCount').textContent = value;
+    numVariables = parseInt(value);
+}
+
+function updateRangeColor(value) {
+    const range = document.getElementById('numVariables');
+    const max = parseInt(range.max);
+    const min = parseInt(range.min);
+    const fraction = (value - min) / (max - min);
+    const red = Math.round(250 * fraction);
+    const green = Math.round(250 * (1 - fraction));
+    const blue = 50;
+    range.style.background = `linear-gradient(to right, rgb(${red}, ${green}, ${blue}) ${fraction * 100}%, #ddd ${fraction * 100}%)`;
+}
+
+function handleRangeChange(value) {
+    updateVariableCount(value);
+    updateRangeColor(value);
+}
 
     function generateDynamicExercise() {
         const container = document.querySelector('.exercise-container');
@@ -101,16 +166,18 @@
         let expressions = [];
         currentCorrectAnswers = {};
 
+        // Initialize variables with appropriate types and values
         while (selectedVariables.length < numVariables) {
             const randomIndex = Math.floor(Math.random() * variableNames.length);
             const variable = variableNames[randomIndex];
             if (!selectedVariables.includes(variable)) {
                 selectedVariables.push(variable);
-                variables[variable] = Math.floor(Math.random() * 50) + 1;
-                expressions.push(`${variable} = ${variables[variable]}`);
+                variables[variable] = initializeVariable(variableNamesWithTypes.anglais[variable]);
+                expressions.push(`${variable} = ${formatValueForDisplay(variables[variable])}`);
             }
         }
 
+        // Generate expressions respecting variable types
         selectedVariables.forEach((variable, index) => {
             const inputId = `inputValue${index + 1}`;
             const errorCheckboxId = `errorCheckbox${index + 1}`;
@@ -132,7 +199,7 @@
             errorCheckbox.id = errorCheckboxId;
             const errorLabel = document.createElement('label');
             errorLabel.htmlFor = errorCheckboxId;
-            errorLabel.textContent = " Erreur ?";
+            errorLabel.textContent = "Erreur ?";
 
             inputGroup.appendChild(labelElement);
             inputGroup.appendChild(inputElement);
@@ -141,45 +208,89 @@
 
             container.appendChild(inputGroup);
 
-            const otherVariables = selectedVariables.filter(v => v !== variable);
-            const otherVariable = otherVariables[Math.floor(Math.random() * otherVariables.length)];
-            const operator = variableNamesWithTypes.operators.arithmetique[Math.floor(Math.random() * variableNamesWithTypes.operators.arithmetique.length)];
-            const randomValue = Math.floor(Math.random() * 21) - 10;
-            let expression, evalResult;
+            // Generate logical or arithmetic expressions based on variable type
+            const isBoolean = variableNamesWithTypes.anglais[variable] === "boolean";
+            const operatorSet = isBoolean ? variableNamesWithTypes.operators.logique : variableNamesWithTypes.operators.arithmetique;
+            const operator = operatorSet[Math.floor(Math.random() * operatorSet.length)];
+            let otherVariable, expression, evalResult;
 
-            if (Math.random() < 0.8 && otherVariables.length > 0) {
-                // 80% chance to depend on another variable
-                expression = `${variable} = ${variable} ${operator} ${otherVariable}`;
-                evalResult = evaluateExpression(variables[variable], variables[otherVariable], operator);
+            if (isBoolean && operator === "not") {
+                expression = `${variable} = not ${variable}`;
+                evalResult = !variables[variable];
             } else {
-                // 20% chance to depend on a numeric value
-                expression = `${variable} = ${variable} ${operator} ${randomValue}`;
-                evalResult = evaluateExpression(variables[variable], randomValue, operator);
+                otherVariable = selectAppropriateVariable(selectedVariables, variables, variable, isBoolean);
+                const valueToUse = otherVariable ? variables[otherVariable] : getRandomBoolean();
+                expression = `${variable} = ${variable} ${operator} ${formatValueForDisplay(valueToUse)}`;
+                evalResult = evaluateExpression(variables[variable], valueToUse, operator);
             }
 
             expressions.push(expression);
             variables[variable] = evalResult;
-            currentCorrectAnswers[inputId] = typeof evalResult === 'number' ? evalResult.toString() : "Error: Division by zero";
+            currentCorrectAnswers[inputId] = typeof evalResult === 'boolean' ? formatValueForDisplay(evalResult) : evalResult.toString();
         });
-
+        shuffle(expressions, numVariables);
         display.textContent = expressions.join('\n');
+    }
+
+    // Utility function to shuffle an array
+    function shuffle(array, start) {
+        for (let i = array.length - 1; i > start-1; i--) {
+            const j = start + Math.floor(Math.random() * (i+1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+    }
+
+
+    function initializeVariable(type) {
+        switch(type) {
+            case "integer":
+            case "float":
+            case "string": //on verra plus tard pour les op sur string
+                return Math.floor(Math.random() * 21) - 10;
+            case "boolean":
+                return Math.random() < 0.5;
+            default:
+                return null; // This should not happen
+        }
+    }
+
+    function formatValueForDisplay(value) {
+        if (typeof value === 'boolean') {
+            return value ? "True" : "False";
+        }
+        return value;
+    }
+
+    function selectAppropriateVariable(variables, values, currentVariable, isBoolean) {
+        return variables.filter(v => v !== currentVariable && typeof values[v] === (isBoolean ? 'boolean' : 'number'))[0];
+    }
+
+    function getRandomBoolean() {
+        return Math.random() < 0.5;
     }
 
     function evaluateExpression(left, right, operator) {
         try {
-            if (operator === "//") {
-                if (right === 0) {
-                    return "Error: Division by zero";
-                }
-                return Math.floor(left / right);
-                } else if (operator === "%") {
-                    if (right === 0) {
-                        return "Error: Division by zero";
-                    }
-                    return left % right;
-            } else {
+            switch(operator) {
+            case "and":
+                return left && right;
+            case "or":
+                return left || right;
+            case "not":
+                return !left; // This should be handled outside since it's unary
+            case "+":
+            case "-":
+            case "*":
                 return eval(`${left} ${operator} ${right}`);
-            }
+            case "//":
+                if (right === 0) return "Error: Division by zero";
+                return Math.floor(left / right);
+            case "%":
+                if (right === 0) return "Error: Division by zero";
+                return left % right;
+            default:
+                return eval(`${left} ${operator} ${right}`);
+        }
         } catch (e) {
             console.error('oups...:', e.message);
             return "Error: Invalid expression";
