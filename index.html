@@ -113,12 +113,18 @@
             max: "float", min: "float", height: "float", width: "float",
             length: "float", size: "integer", position: "integer", status: "string",
             color: "string", date: "string", flag: "boolean", isActive: "boolean",
-            hasItems: "boolean", isVisible: "boolean"
+            hasItems: "boolean", isVisible: "boolean",  nom: "string",
+        scoreUtilisateur: "integer", compteur: "integer", total: "float",
+        somme: "float", produit: "float", moyenne: "float", maximum: "float",
+        minimum: "float", hauteur: "float", largeur: "float", longueur: "float", taille: "integer",
+        position: "integer", statut: "string", couleur: "string", date: "string",
+        drapeau: "boolean", estActif: "boolean", aDesObjets: "boolean", estVisible: "boolean",
         },
         operators: {
-            arithmetique: ["+", "-", "*", "//", "%"],
+            cocktail: ["+", "-", "+", "*", "//", "%","==", "!=", "<", ">", "<=", ">="],
             logique: ["and", "or", "not"],
-            comparaison: ["==", "!=", "<", ">", "<=", ">="]
+            comparaison: ["==", "!=", "<", ">", "<=", ">="],
+            arithmetique: ["+", "-", "*", "//", "%"]
         }
     };
 
@@ -154,11 +160,12 @@ function handleRangeChange(value) {
     updateVariableCount(value);
     updateRangeColor(value);
     updateOperatorAvailability(value);
+    generateDynamicExercise();
 }
 function updateOperatorAvailability(num) {
-    const maxOperators = parseInt(num);  // Based on the range input, adapt the operators
-    const arithmetiqueOperators = variableNamesWithTypes.operators.arithmetique.slice(0, Math.min(maxOperators, variableNamesWithTypes.operators.arithmetique.length));
-    variableNamesWithTypes.currentOperators = arithmetiqueOperators;
+    const maxOperators = 2*parseInt(num);  //numVariables de 1 à 6; maxOperators de 2 à 12... donc slice[#0;#12[
+    const cocktailOperators = variableNamesWithTypes.operators.cocktail.slice(0, Math.min(maxOperators, variableNamesWithTypes.operators.cocktail.length));
+    variableNamesWithTypes.currentOperators = cocktailOperators; 
     console.log('Available Operators:', variableNamesWithTypes.currentOperators); // Debugging to see available operators
 }
     function generateDynamicExercise() {
@@ -195,7 +202,7 @@ function updateOperatorAvailability(num) {
 
             const labelElement = document.createElement('label');
             labelElement.htmlFor = inputId;
-            labelElement.textContent = `Valeur finale de ${variable}:`;
+            labelElement.textContent = `${variable}:`;
 
             const inputElement = document.createElement('input');
             inputElement.type = 'text';
@@ -221,7 +228,7 @@ function updateOperatorAvailability(num) {
             const operatorSet = isBoolean ? variableNamesWithTypes.operators.logique : variableNamesWithTypes.currentOperators;
             const operator = operatorSet[Math.floor(Math.random() * operatorSet.length)];
             let otherVariable, expression, evalResult;
-
+ 
             if (isBoolean && operator === "not") {
                 expression = `${variable} = not ${variable}`;
                 evalResult = !variables[variable];
@@ -254,7 +261,7 @@ function updateOperatorAvailability(num) {
             case "integer":
             case "float":
             case "string": //on verra plus tard pour les op sur string
-                return Math.floor(Math.random() * 21) - 10;
+                return Math.floor(Math.random() * 11) - 0;
             case "boolean":
                 return Math.random() < 0.5;
             default:
@@ -275,6 +282,10 @@ function updateOperatorAvailability(num) {
 
     function getRandomBoolean() {
         return Math.random() < 0.5;
+    }
+
+    function getRandomCompar() {
+        return Math.floor(Math.random() *  variableNamesWithTypes.operators.comparaison.length);
     }
 
     function evaluateExpression(left, right, operator) {
