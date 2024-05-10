@@ -21,25 +21,17 @@
             padding: 10px;
             margin-right: 5px; /* Spacing between input and checkbox */
             flex: 1; /* Permet aux inputs de prendre toute la largeur disponible */
-            /*flex: 1 0 auto;*/
-        }/*
-        input[type="text"] {
-            padding: 10px;
-            margin-right: 5px;
-            /* flex: 1 0 auto;*/
         }
-        input [type="range"] {
-            padding: 10px;
-            margin-right: 5px;
-            flex: 1 0 auto;
-            -webkit-appearance: none;
+        input[type="range"] {
+            -webkit-appearance: none; /* Override default CSS styles */
+            appearance: none;
             width: 100%;
             height: 8px;
             border-radius: 4px;
-            background: #28a745;
+            background: #ddd; /* Initial background */
             outline: none;
             transition: background 0.3s;
-            }
+        }
 
         input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
@@ -57,19 +49,17 @@
             border-radius: 50%;
             background: #fff;
             cursor: pointer;
-        }*/
+        }
 
         input[type="checkbox"] {
             margin-right: 5px;
         }
-        /*button {
+        button {
             padding: 10px 15px;
             margin-right: 5px;
             border: none;
-            background-color: #5cb85c;
-            color: white;
             cursor: pointer;
-        }*/
+        }
         .button-new-exercise {
             background-color: #007BFF; /* Blue for new exercise */
             color: white;
@@ -107,8 +97,8 @@
         <p>Que valent les variables à la fin de l'exécution du code Python ci-dessous ?</p>
         <pre id="code-display">Exemple de code</pre>
 
-        <label for="numVariables">Nombre de variables (2 à 5):</label>
-        <input type="range" id="numVariables" min="2" max="5" value="3" oninput="handleRangeChange(this.value);">
+        <label for="numVariables">Nombre de variables (1 à 6):</label>
+        <input type="range" id="numVariables" min="1" max="6" value="3" oninput="handleRangeChange(this.value);">
         <span id="variableCount">3</span>
         
         <button id="verify-button" class="button-verify">Vérifier</button>
@@ -135,33 +125,35 @@
     let numVariables = 3; // Default number of variables
 
     document.addEventListener('DOMContentLoaded', function() {
-        document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
-        document.getElementById('verify-button').addEventListener('click', verifyAnswers);
-        document.getElementById('show-button').addEventListener('click', showAnswers);
-        generateDynamicExercise(); // Initial call to populate the exercise
+    document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
+    document.getElementById('verify-button').addEventListener('click', verifyAnswers);
+    document.getElementById('show-button').addEventListener('click', showAnswers);
+    document.getElementById('numVariables').addEventListener('input', function() {
+        handleRangeChange(this.value);
     });
+    generateDynamicExercise(); // Initial call to populate the exercise
+});
 
-    function handleRangeChange(value) {
-        updateVariableCount(value);
-        updateRangeColor(value);
-    }
+function updateVariableCount(value) {
+    document.getElementById('variableCount').textContent = value;
+    numVariables = parseInt(value);
+}
 
-    function updateVariableCount(value) {
-        document.getElementById('variableCount').textContent = value;
-        numVariables = parseInt(value);
-    }
+function updateRangeColor(value) {
+    const range = document.getElementById('numVariables');
+    const max = parseInt(range.max);
+    const min = parseInt(range.min);
+    const fraction = (value - min) / (max - min);
+    const red = Math.round(250 * fraction);
+    const green = Math.round(250 * (1 - fraction));
+    const blue = 50;
+    range.style.background = `linear-gradient(to right, rgb(${red}, ${green}, ${blue}) ${fraction * 100}%, #ddd ${fraction * 100}%)`;
+}
 
-    function updateRangeColor(value) {
-        const max = parseInt(document.getElementById('numVariables').max);
-        const min = parseInt(document.getElementById('numVariables').min);
-        const fraction = (value - min) / (max - min);
-        // Interpoler entre vert (0,255,0) et rouge (255,0,0)
-        const red = Math.round(255 * fraction);
-        const green = Math.round(255 * (1 - fraction));
-        const blue = 0;
-        document.getElementById('numVariables').style.background = `rgb(${red},${green},${blue})`;
-        //document.getElementById('variableCount').textContent = value;
-    }
+function handleRangeChange(value) {
+    updateVariableCount(value);
+    updateRangeColor(value);
+}
 
     function generateDynamicExercise() {
         const container = document.querySelector('.exercise-container');
@@ -207,7 +199,7 @@
             errorCheckbox.id = errorCheckboxId;
             const errorLabel = document.createElement('label');
             errorLabel.htmlFor = errorCheckboxId;
-            errorLabel.textContent = "Erreur de division par zéro?";
+            errorLabel.textContent = "Erreur ?";
 
             inputGroup.appendChild(labelElement);
             inputGroup.appendChild(inputElement);
@@ -236,9 +228,18 @@
             variables[variable] = evalResult;
             currentCorrectAnswers[inputId] = typeof evalResult === 'boolean' ? formatValueForDisplay(evalResult) : evalResult.toString();
         });
-
+        shuffle(expressions, numVariables);
         display.textContent = expressions.join('\n');
     }
+
+    // Utility function to shuffle an array
+    function shuffle(array, start) {
+        for (let i = array.length - 1; i > start-1; i--) {
+            const j = start + Math.floor(Math.random() * (i+1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+    }
+
 
     function initializeVariable(type) {
         switch(type) {
