@@ -97,7 +97,7 @@
         <p>Que valent les variables à la fin de l'exécution du code Python ci-dessous ?</p>
         <pre id="code-display">Exemple de code</pre>
 
-        <label for="numVariables">Nombre de variables (1 à 6):</label>
+        <label for="numVariables">Niveau de difficulté (1 à 6):</label>
         <input type="range" id="numVariables" min="1" max="6" value="3" oninput="handleRangeChange(this.value);">
         <span id="variableCount">3</span>
         
@@ -113,12 +113,18 @@
             max: "float", min: "float", height: "float", width: "float",
             length: "float", size: "integer", position: "integer", status: "string",
             color: "string", date: "string", flag: "boolean", isActive: "boolean",
-            hasItems: "boolean", isVisible: "boolean"
+            hasItems: "boolean", isVisible: "boolean",  nom: "string",
+        scoreUtilisateur: "integer", compteur: "integer", total: "float",
+        somme: "float", produit: "float", moyenne: "float", maximum: "float",
+        minimum: "float", hauteur: "float", largeur: "float", longueur: "float", taille: "integer",
+        position: "integer", statut: "string", couleur: "string", date: "string",
+        drapeau: "boolean", estActif: "boolean", aDesObjets: "boolean", estVisible: "boolean",
         },
         operators: {
-            arithmetique: ["+", "-", "*", "//", "%"],
+            cocktail: ["+", "-", "+", "*", "//", "%","==", "!=", "<", ">", "<=", ">="],
             logique: ["and", "or", "not"],
-            comparaison: ["==", "!=", "<", ">", "<=", ">="]
+            comparaison: ["==", "!=", "<", ">", "<=", ">="],
+            arithmetique: ["+", "-", "*", "//", "%"]
         }
     };
 
@@ -153,8 +159,15 @@ function updateRangeColor(value) {
 function handleRangeChange(value) {
     updateVariableCount(value);
     updateRangeColor(value);
+    updateOperatorAvailability(value);
+    generateDynamicExercise();
 }
-
+function updateOperatorAvailability(num) {
+    const maxOperators = 2*parseInt(num);  //numVariables de 1 à 6; maxOperators de 2 à 12... donc slice[#0;#12[
+    const cocktailOperators = variableNamesWithTypes.operators.cocktail.slice(0, Math.min(maxOperators, variableNamesWithTypes.operators.cocktail.length));
+    variableNamesWithTypes.currentOperators = cocktailOperators; 
+    console.log('Available Operators:', variableNamesWithTypes.currentOperators); // Debugging to see available operators
+}
     function generateDynamicExercise() {
         const container = document.querySelector('.exercise-container');
         const display = document.getElementById('code-display');
@@ -176,6 +189,8 @@ function handleRangeChange(value) {
                 expressions.push(`${variable} = ${formatValueForDisplay(variables[variable])}`);
             }
         }
+        //prise en cpompte niveau de difficulté
+        updateOperatorAvailability(numVariables);
 
         // Generate expressions respecting variable types
         selectedVariables.forEach((variable, index) => {
@@ -187,7 +202,7 @@ function handleRangeChange(value) {
 
             const labelElement = document.createElement('label');
             labelElement.htmlFor = inputId;
-            labelElement.textContent = `Valeur finale de ${variable}:`;
+            labelElement.textContent = `${variable}:`;
 
             const inputElement = document.createElement('input');
             inputElement.type = 'text';
@@ -210,10 +225,10 @@ function handleRangeChange(value) {
 
             // Generate logical or arithmetic expressions based on variable type
             const isBoolean = variableNamesWithTypes.anglais[variable] === "boolean";
-            const operatorSet = isBoolean ? variableNamesWithTypes.operators.logique : variableNamesWithTypes.operators.arithmetique;
+            const operatorSet = isBoolean ? variableNamesWithTypes.operators.logique : variableNamesWithTypes.currentOperators;
             const operator = operatorSet[Math.floor(Math.random() * operatorSet.length)];
             let otherVariable, expression, evalResult;
-
+ 
             if (isBoolean && operator === "not") {
                 expression = `${variable} = not ${variable}`;
                 evalResult = !variables[variable];
@@ -246,7 +261,7 @@ function handleRangeChange(value) {
             case "integer":
             case "float":
             case "string": //on verra plus tard pour les op sur string
-                return Math.floor(Math.random() * 21) - 10;
+                return Math.floor(Math.random() * 11) - 0;
             case "boolean":
                 return Math.random() < 0.5;
             default:
@@ -267,6 +282,10 @@ function handleRangeChange(value) {
 
     function getRandomBoolean() {
         return Math.random() < 0.5;
+    }
+
+    function getRandomCompar() {
+        return Math.floor(Math.random() *  variableNamesWithTypes.operators.comparaison.length);
     }
 
     function evaluateExpression(left, right, operator) {
