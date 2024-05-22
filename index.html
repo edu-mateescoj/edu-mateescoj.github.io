@@ -17,11 +17,7 @@
             justify-content: space-between; /* Assure l'espacement entre les éléments */
             margin-bottom: 10px;
         }
-        .range-container {
-            display: flex;
-            align-items: center;
-            width: 100%;
-        }input[type="text"], input[type="range"] {
+        input[type="text"], input[type="range"] {
             padding: 10px;
             margin-right: 5px; /* Spacing between input and checkbox */
             flex: 1; /* Permet aux inputs de prendre toute la largeur disponible */
@@ -94,14 +90,10 @@
         label {
             padding: 10px;
             flex: 0 0 20%; /* Alloue 20% de la largeur du conteneur aux labels */
-            margin-right: 10px;
+            margin-right: 10px; /* Ensure spacing */
         }
-        #variableCount {
-            padding: 10px;
-            min-width: 40px; /* faut une largeur suffisante pour le chiffre */
-            text-align: center;
-        }    </style>
-    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    </style>
+    <link rel="icon" href="\favicon.ico" type="image/x-icon">
 </head>
 <body>
     <div class="exercise-container">
@@ -360,3 +352,20 @@ function updateOperatorAvailability(num) {
             }
         });
     }
+    function showAnswers() {
+        document.querySelectorAll('.input-group').forEach(group => {
+            const input = group.querySelector('input[type="text"]');
+            const errorCheckbox = group.querySelector('input[type="checkbox"]');
+            if (currentCorrectAnswers[input.id].startsWith("Error")) {
+                errorCheckbox.checked = true;
+                input.value = "";  // Clear the input as it's an error
+                input.style.backgroundColor = 'lightgray';
+            } else {
+                input.value = currentCorrectAnswers[input.id];
+                input.style.backgroundColor = 'lightgray';
+            }
+        });
+    }
+    </script>
+</body>
+</html>
