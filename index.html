@@ -360,3 +360,20 @@ function updateOperatorAvailability(num) {
             }
         });
     }
+    function showAnswers() {
+        document.querySelectorAll('.input-group').forEach(group => {
+            const input = group.querySelector('input[type="text"]');
+            const errorCheckbox = group.querySelector('input[type="checkbox"]');
+            if (currentCorrectAnswers[input.id].startsWith("Error")) {
+                errorCheckbox.checked = true;
+                input.value = "";  // Clear the input as it's an error
+                input.style.backgroundColor = 'lightgray';
+            } else {
+                input.value = currentCorrectAnswers[input.id];
+                input.style.backgroundColor = 'lightgray';
+            }
+        });
+    }
+    </script>
+</body>
+</html>
