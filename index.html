@@ -17,7 +17,11 @@
             justify-content: space-between; /* Assure l'espacement entre les éléments */
             margin-bottom: 10px;
         }
-        input[type="text"], input[type="range"] {
+        .range-container {
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }input[type="text"], input[type="range"] {
             padding: 10px;
             margin-right: 5px; /* Spacing between input and checkbox */
             flex: 1; /* Permet aux inputs de prendre toute la largeur disponible */
@@ -55,28 +59,31 @@
             margin-right: 5px;
         }
         button {
-            padding: 10px 15px;
+            padding: 15px 10px;
             margin-right: 5px;
             border: none;
             cursor: pointer;
         }
         .button-new-exercise {
+            padding: 10px;
             background-color: #007BFF; /* Blue for new exercise */
             color: white;
         }
 
         .button-verify {
+            /* padding: 10px;*/
             background-color: #28a745; /* Green for verify */
             color: white;
         }
 
         .button-show-answers {
+            padding: 10px;
             background-color: #6c757d; /* Gray for show answers */
             color: white;
         }
 
         button:hover {
-            opacity: 0.8;
+            opacity: 0.7;
         }
         pre {
             background-color: #f8f8f8;
@@ -85,22 +92,29 @@
             margin-bottom: 10px; /* Espacement en dessous du bloc de code */
         }
         label {
+            padding: 10px;
             flex: 0 0 20%; /* Alloue 20% de la largeur du conteneur aux labels */
-            margin-right: 10px; /* Ensure spacing */
+            margin-right: 10px;
         }
-    </style>
+        #variableCount {
+            padding: 10px;
+            min-width: 40px; /* faut une largeur suffisante pour le chiffre */
+            text-align: center;
+        }    </style>
     <link rel="icon" href="C:\Users\julien\Downloads\favicon.ico" type="image/x-icon">
 </head>
 <body>
     <div class="exercise-container">
         <h2>Exercices automatiques d'assignation de variables</h2>
+        
         <p>Que valent les variables à la fin de l'exécution du code Python ci-dessous ?</p>
-        <pre id="code-display">Exemple de code</pre>
-
+        
         <label for="numVariables">Niveau de difficulté (1 à 6):</label>
         <input type="range" id="numVariables" min="1" max="6" value="3" oninput="handleRangeChange(this.value);">
         <span id="variableCount">3</span>
         
+        <pre id="code-display">Exemple de code</pre>
+
         <button id="verify-button" class="button-verify">Vérifier</button>
         <button id="show-button" class="button-show-answers">Montrer les réponses</button>
         <button id="generate-button" class="button-new-exercise">Nouvel exercice</button>
@@ -108,18 +122,21 @@
     <script>
     const variableNamesWithTypes = {
         anglais: {
-            age: "integer", name: "string", userScore: "integer", count: "integer",
+            n: "integer", x: "integer", y:"integer", z:"integer", a:"integer", b:"integer", 
+            i:"integer", j:"integer", k: "integer", age: "integer", name: "string", user_id: "integer", count: "integer",
             total: "float", sum: "float", product: "float", average: "float",
             max: "float", min: "float", height: "float", width: "float",
             length: "float", size: "integer", position: "integer", status: "string",
-            color: "string", date: "string", flag: "boolean", isActive: "boolean",
-            hasItems: "boolean", isVisible: "boolean",  nom: "string",
-        scoreUtilisateur: "integer", compteur: "integer", total: "float",
-        somme: "float", produit: "float", moyenne: "float", maximum: "float",
-        minimum: "float", hauteur: "float", largeur: "float", longueur: "float", taille: "integer",
-        position: "integer", statut: "string", couleur: "string", date: "string",
-        drapeau: "boolean", estActif: "boolean", aDesObjets: "boolean", estVisible: "boolean",
-        },
+            color: "string", date: "string", flag: "boolean", is_active: "boolean",
+            has_items: "boolean", is_visible: "boolean",  nom: "string", user_score: "integer",
+            score_utilisateur: "integer", compteur: "integer", total: "float",
+            somme: "float", produit: "float", moyenne: "float", maximum: "float", quotient: "float",
+            minimum: "float", hauteur: "float", largeur: "float", longueur: "float", taille: "integer",
+            position: "integer", statut: "string", couleur: "string", date: "string", data_points: "float",
+            drapeau: "boolean", est_actif: "boolean", a_des_objets: "boolean", est_visible: "boolean",
+            est_complet: "boolean", est_valide: "boolean", login_attempts: "integer", 
+            cell_number: "integer", is_verified: "boolean", price_per_unit: "float"
+                },
         operators: {
             cocktail: ["+", "-", "+", "*", "//", "%","==", "!=", "<", ">", "<=", ">="],
             logique: ["and", "or", "not"],
@@ -343,20 +360,3 @@ function updateOperatorAvailability(num) {
             }
         });
     }
-    function showAnswers() {
-        document.querySelectorAll('.input-group').forEach(group => {
-            const input = group.querySelector('input[type="text"]');
-            const errorCheckbox = group.querySelector('input[type="checkbox"]');
-            if (currentCorrectAnswers[input.id].startsWith("Error")) {
-                errorCheckbox.checked = true;
-                input.value = "";  // Clear the input as it's an error
-                input.style.backgroundColor = 'lightgray';
-            } else {
-                input.value = currentCorrectAnswers[input.id];
-                input.style.backgroundColor = 'lightgray';
-            }
-        });
-    }
-    </script>
-</body>
-</html>
