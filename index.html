@@ -17,7 +17,11 @@
             justify-content: space-between; /* Assure l'espacement entre les éléments */
             margin-bottom: 10px;
         }
-        input[type="text"], input[type="range"] {
+        .range-container {
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }input[type="text"], input[type="range"] {
             padding: 10px;
             margin-right: 5px; /* Spacing between input and checkbox */
             flex: 1; /* Permet aux inputs de prendre toute la largeur disponible */
@@ -90,17 +94,32 @@
         label {
             padding: 10px;
             flex: 0 0 20%; /* Alloue 20% de la largeur du conteneur aux labels */
-            margin-right: 10px; /* Ensure spacing */
+            margin-right: 10px;
         }
+<<<<<<< HEAD
+        #variableCount {
+            padding: 10px;
+            min-width: 40px; /* faut une largeur suffisante pour le chiffre */
+            text-align: center;
+        }    </style>
+    <link rel="icon" href="C:\Users\julien\Downloads\favicon.ico" type="image/x-icon">
+=======
     </style>
     <link rel="icon" href="\favicon.ico" type="image/x-icon">
+>>>>>>> 7802da1fe1cd4173c1ef4f508d19f73e7cc31eac
 </head>
 <body>
     <div class="exercise-container">
         <h2>Exercices automatiques d'assignation de variables</h2>
+<<<<<<< HEAD
+        
+        <p>Que valent les variables à la fin de l'exécution du code Python ci-dessous ?</p>
+        
+=======
         
         <p>Que valent les variables à la fin de l'exécution du code `Python` ci-dessous ?</p>
         
+>>>>>>> 7802da1fe1cd4173c1ef4f508d19f73e7cc31eac
         <label for="numVariables">Niveau de difficulté (1 à 6):</label>
         <input type="range" id="numVariables" min="1" max="6" value="3" oninput="handleRangeChange(this.value);">
         <span id="variableCount">3</span>
@@ -209,11 +228,13 @@ function handleRangeChange(value) {
         const variableNames = Object.keys(variableNamesWithTypes.anglais);
         let selectedVariables = []; //une liste pour vérifier si le nom choisi random était déjà là
         let variables = {};         //va recevoir les variables avec leur valeur
-        let expressions = [];       
+        let expressions = [];       //les expressions affichables, selon syntaxe Python
         currentCorrectAnswers = {};  // portée plus large... pour les vérifs!
 
         /* Initialisation de la liste des variables choisies :
-        nom pris parmi liste, puis attribution de valeur random selon type
+        nom pris parmi liste, puis attribution de valeur random par appel de "initializeVariable"
+        boolean: ou 0 ou 1 (50% chance), avec changement syntaxique JS => Python
+        integer: entre 0 et 10 ; float et string IDEM ici
         */
         while (selectedVariables.length < numVariables) {
             const randomIndex = Math.floor(Math.random() * variableNames.length);
@@ -227,38 +248,58 @@ function handleRangeChange(value) {
         //prise en cpompte niveau de difficulté
         updateOperatorAvailability(numVariables);
 
-        // Generate expressions respecting variable types
+        /* Generation des expressions selon types des variables:
+        Parcourir la liste des variables choisies, nom "variable" affichable, à la position "index"
+        1) préparer les éléments HTML - CSS
+        2) créer une expression logique ou arithmétique selon type de variable
+        3) évaluer l'expression pour obtenir la valeur finale de la variable
+        4) stocker l'expression et la valeur finale dans les listes appropriées
+        5) mélanger les expressions pour éviter une corrélation entre les variables
+        6) afficher les expressions dans l'élément "pre" de la page
+        7) stocker les réponses correctes dans un objet pour la vérification
+        8) afficher les éléments d'entrée de texte et les cases à cocher pour l'utilisateur
+        */
         selectedVariables.forEach((variable, index) => {
+            // 1)
+            //des identifiants uniques pour les éléments d'entrée de texte et les cases à cocher
             const inputId = `inputValue${index + 1}`;
             const errorCheckboxId = `errorCheckbox${index + 1}`;
-
+            //nouveau "div" créé pour chaque variable, conteneur pour les éléments de saisie (texte, étiquettes, cases à cocher)
             const inputGroup = document.createElement('div');
             inputGroup.className = 'input-group';
 
+            //création d'une "étiquette" qui sera à gauche de l'élément d'entrée de texte
             const labelElement = document.createElement('label');
             labelElement.htmlFor = inputId;
             labelElement.textContent = `${variable}:`;
-
+            
+            // création des éléments d'entrée de réponse pour l'élève + étiquette "Erreur?"
             const inputElement = document.createElement('input');
             inputElement.type = 'text';
             inputElement.id = inputId;
             inputElement.placeholder = `Valeur finale de ${variable}`;
-
             const errorCheckbox = document.createElement('input');
             errorCheckbox.type = 'checkbox';
             errorCheckbox.id = errorCheckboxId;
             const errorLabel = document.createElement('label');
             errorLabel.htmlFor = errorCheckboxId;
             errorLabel.textContent = "Erreur ?";
-
+            
+            //assemblage des éléments
             inputGroup.appendChild(labelElement);
             inputGroup.appendChild(inputElement);
             inputGroup.appendChild(errorCheckbox);
             inputGroup.appendChild(errorLabel);
-
+            //ajout au conteneur principal
             container.appendChild(inputGroup);
 
-            // Generate logical or arithmetic expressions based on variable type
+            /* étapes 2) et 3)
+            2)
+            Génération des expressions: le type de la variable (booléenne ou non) définit l'ensemble des opérateurs parmi lesquels choisir
+            si booléenne, on prend l'opérateur aléatoirement dans la liste assocée à la clé "logique", sinon parmi le "cocktail" adapté au niveau
+            3)
+            Evaluation de l'expression pour obtenir la valeur finale de la variable
+            */
             const isBoolean = variableNamesWithTypes.anglais[variable] === "boolean";
             const operatorSet = isBoolean ? variableNamesWithTypes.operators.logique : variableNamesWithTypes.currentOperators;
             const operator = operatorSet[Math.floor(Math.random() * operatorSet.length)];
@@ -273,16 +314,19 @@ function handleRangeChange(value) {
                 expression = `${variable} = ${variable} ${operator} ${formatValueForDisplay(valueToUse)}`;
                 evalResult = evaluateExpression(variables[variable], valueToUse, operator);
             }
-
+            // étape 4)
+            // Stockage des expressions et des valeurs dans les listes appropriées
             expressions.push(expression);
             variables[variable] = evalResult;
             currentCorrectAnswers[inputId] = typeof evalResult === 'boolean' ? formatValueForDisplay(evalResult) : evalResult.toString();
         });
+        //  5)
+        // Mélange des expressions (après les assignations initiales) pour ajouter de l'aléatoire à l'affichage
         shuffle(expressions, numVariables);
         display.textContent = expressions.join('\n');
     }
 
-    // Utility function to shuffle an array
+    // fonction utilitaire: mélanger un tableau à partir d'une position donnée
     function shuffle(array, start) {
         for (let i = array.length - 1; i > start-1; i--) {
             const j = start + Math.floor(Math.random() * (i+1));
@@ -290,20 +334,20 @@ function handleRangeChange(value) {
         }
     }
 
-
+    // fonction utilitaire: initialiser aléatoirement, selon type, une variable
     function initializeVariable(type) {
         switch(type) {
             case "integer":
-            case "float":
+            case "float": //on fait semblant... on veut pas de calcul avec décimales!
             case "string": //on verra plus tard pour les op sur string
                 return Math.floor(Math.random() * 11) - 0;
             case "boolean":
                 return Math.random() < 0.5;
             default:
-                return null; // This should not happen
+                return null; // just in case... débuggage
         }
     }
-
+    // ne fait que rajouter la majuscule (JS => Python) pour les booléens
     function formatValueForDisplay(value) {
         if (typeof value === 'boolean') {
             return value ? "True" : "False";
@@ -331,7 +375,7 @@ function handleRangeChange(value) {
             case "or":
                 return left || right;
             case "not":
-                return !left; // This should be handled outside since it's unary
+                return !left; // opérateur unaire... donc devrait être géré ailleurs
             case "+":
             case "-":
             case "*":
@@ -346,7 +390,7 @@ function handleRangeChange(value) {
                 return eval(`${left} ${operator} ${right}`);
         }
         } catch (e) {
-            console.error('oups...:', e.message);
+            console.error('oups... (pas vu, pas pris):', e.message);
             return "Error: Invalid expression";
         
         }
