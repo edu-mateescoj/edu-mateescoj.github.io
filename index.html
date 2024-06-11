@@ -137,23 +137,32 @@
         }
     };
 
-    let numVariables = 3; // Default number of variables
-
+    let numVariables = 3; //niveau de difficulté par défaut... historiquement c'était le nombre de variables
+        
+    /* 1) écouteur d'événements attaché à l'objet "document" pour exécuter 
+    un appel groupé aux fonctions SEULEMENT APRES QUE le DOM de la page a été chargé 
+    (évite bugs liés à l'exécution de scripts qui manipulent le DOM trop tôt
+    2) Connecte les clics sur les boutons aux fonctions concernées (x3)
+    3) Chaque fois que le curseur est déplacé, la fonction handleRangeChange est appelée avec la nouvelle valeur.
+    chatGPT dit: "Ajoute un gestionnaire pour l'événement input sur un élément input de type range identifié par numVariables."
+    */
     document.addEventListener('DOMContentLoaded', function() {
-    document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
+     document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
     document.getElementById('verify-button').addEventListener('click', verifyAnswers);
     document.getElementById('show-button').addEventListener('click', showAnswers);
     document.getElementById('numVariables').addEventListener('input', function() {
         handleRangeChange(this.value);
+        });
+    generateDynamicExercise(); // appelle  de suite la fonction principale
     });
-    generateDynamicExercise(); // Initial call to populate the exercise
-});
-
+        
+// affectation de la valeur du curseur à la variable
 function updateVariableCount(value) {
     document.getElementById('variableCount').textContent = value;
     numVariables = parseInt(value);
 }
-
+        
+// une bête interpolation linéaire du vert (facile) au rouge (dur)
 function updateRangeColor(value) {
     const range = document.getElementById('numVariables');
     const max = parseInt(range.max);
@@ -165,30 +174,47 @@ function updateRangeColor(value) {
     range.style.background = `linear-gradient(to right, rgb(${red}, ${green}, ${blue}) ${fraction * 100}%, #ddd ${fraction * 100}%)`;
 }
 
+/* à chaque saisie d'un niveau de difficulté, il faut:
+1) màj la valeur du niveau de difficulté dans "numVariables"
+2) màj la couleur du curseur selon niveau
+3) màj la liste des opérateurs selon niveau
+4) générer le nouvel exo correspondant 
+*/
 function handleRangeChange(value) {
     updateVariableCount(value);
     updateRangeColor(value);
     updateOperatorAvailability(value);
     generateDynamicExercise();
 }
-function updateOperatorAvailability(num) {
-    const maxOperators = 2*parseInt(num);  //numVariables de 1 à 6; maxOperators de 2 à 12... donc slice[#0;#12[
+    // 3) màj la liste des opérateurs selon niveau
+    function updateOperatorAvailability(num) {
+    const maxOperators = 2*parseInt(num);  
+    /* numVariables de 1 à 6; nb_maxOperators de 2 à 12... donc slice[#0;#12[ dans ma liste d'opérateurs, 
+    structure de données collée en haut du script: un dictionnaire des opérateurs au format 
+    { nom_de_liste : ["operateur1", "operateur2", etc.] }
+    NB: historiquement les listes ont changé... longueur variable pour accomoder choix des collègues
+    */
     const cocktailOperators = variableNamesWithTypes.operators.cocktail.slice(0, Math.min(maxOperators, variableNamesWithTypes.operators.cocktail.length));
     variableNamesWithTypes.currentOperators = cocktailOperators; 
-    console.log('Available Operators:', variableNamesWithTypes.currentOperators); // Debugging to see available operators
+    console.log('Available Operators:', variableNamesWithTypes.currentOperators); // Debugging
 }
+ 
+    // voilà le vif du sujet!!
     function generateDynamicExercise() {
+        // nettoyer l'interface utilisateur des anciennes entrées avant de générer de nouvelles
         const container = document.querySelector('.exercise-container');
         const display = document.getElementById('code-display');
         container.querySelectorAll('.input-group').forEach(el => el.remove());
 
         const variableNames = Object.keys(variableNamesWithTypes.anglais);
-        let selectedVariables = [];
-        let variables = {};
-        let expressions = [];
-        currentCorrectAnswers = {};
+        let selectedVariables = []; //une liste pour vérifier si le nom choisi random était déjà là
+        let variables = {};         //va recevoir les variables avec leur valeur
+        let expressions = [];       
+        currentCorrectAnswers = {};  // portée plus large... pour les vérifs!
 
-        // Initialize variables with appropriate types and values
+        /* Initialisation de la liste des variables choisies :
+        nom pris parmi liste, puis attribution de valeur random selon type
+        */
         while (selectedVariables.length < numVariables) {
             const randomIndex = Math.floor(Math.random() * variableNames.length);
             const variable = variableNames[randomIndex];
