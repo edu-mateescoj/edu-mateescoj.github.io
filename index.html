@@ -307,15 +307,20 @@ function handleRangeChange(value) {
             // étape 4)
             // Stockage des expressions et des valeurs dans les listes appropriées
             expressions.push(expression);
+            // étape 7)
+            // Stockage des réponses correctes dans un objet pour la vérification
             variables[variable] = evalResult;
             currentCorrectAnswers[inputId] = typeof evalResult === 'boolean' ? formatValueForDisplay(evalResult) : evalResult.toString();
         });
         //  5)
         // Mélange des expressions (après les assignations initiales) pour ajouter de l'aléatoire à l'affichage
         shuffle(expressions, numVariables);
+        
+        // 7)
         display.textContent = expressions.join('\n');
     }
 
+    // pour étape 5)
     // fonction utilitaire: mélanger un tableau à partir d'une position donnée
     function shuffle(array, start) {
         for (let i = array.length - 1; i > start-1; i--) {
@@ -337,26 +342,36 @@ function handleRangeChange(value) {
                 return null; // just in case... débuggage
         }
     }
-    // ne fait que rajouter la majuscule (JS => Python) pour les booléens
+    // fonction utilitaire: ne fait que rajouter la majuscule (JS => Python) pour les booléens
     function formatValueForDisplay(value) {
         if (typeof value === 'boolean') {
             return value ? "True" : "False";
         }
         return value;
     }
-
+    /* fonction utilitaire: sélectionne une variable appropriée pour former une expression logique ou sinon arithmétique
+    a) On commence par filtrer le tableau "variables" pour exclure la "currentVariable" de la sélection, 
+    b) Deuxième critère de filtrage : le type de la valeur associée à chaque variable dans l'objet "values"
+        Si booléen: l'opération doit être logique, et donc seule une autre variable de type boolean ('boolean') peut être choisie. 
+        Sinon: l'opération est arithmétique ou de comparaison, et une variable de type numérique ('number') est nécessaire.
+    c) Sélection de la première correspondance :
+        Après le filtrage, le tableau résultant contient toutes les variables qui ne sont pas la variable actuelle et qui ont le type approprié pour l'opération en cours. 
+        La fonction retourne le premier élément de ce tableau filtré avec indexation [0].
+        Si aucune variable n'est disponible qui correspond aux critères (par exemple, s'il n'y a pas d'autres variables booléennes pour une opération logique), 
+        cette fonction retournerait undefined... à gérer par le code appelant.
+    */
     function selectAppropriateVariable(variables, values, currentVariable, isBoolean) {
         return variables.filter(v => v !== currentVariable && typeof values[v] === (isBoolean ? 'boolean' : 'number'))[0];
     }
-
+    // pour étape 3)
     function getRandomBoolean() {
         return Math.random() < 0.5;
     }
-
+    // plus utilisée pour l'instant... mais on sait jamais :)
     function getRandomCompar() {
         return Math.floor(Math.random() *  variableNamesWithTypes.operators.comparaison.length);
     }
-
+    // pour étape 3)
     function evaluateExpression(left, right, operator) {
         try {
             switch(operator) {
