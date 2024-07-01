@@ -400,22 +400,322 @@ class PythonModule extends HTMLElement {
   }
 }
 
+/* définition des classes pour mon exerciseur dynamique */
+class ExerciseGenerator {
+  constructor(difficulty = 3) {
+      this.difficulty = difficulty;
+      this.variables = [];
+      this.expressions = [];
+      this.currentCorrectAnswers = {};
+      this.myData = {
+          name_and_type: {
+              n: "integer", x: "integer", y: "integer", z: "integer", a: "integer", b: "integer", temp:"integer", item: "float", 
+              i:"integer", j:"integer", k: "integer", age: "integer", name: "string", user_id: "integer", count: "integer",
+              total: "float", sum: "float", product: "float", average: "float", mon_index: "integer", my_index: "integer", index: "integer", 
+              max: "float", min: "float", height: "float", width: "float", dividende: "integer", girth: "float", 
+              length: "float", size: "integer", position: "integer", status: "string", diviseur: "integer", 
+              color: "string", date: "string", flag: "boolean", is_active: "boolean", divisor: "integer", nb_users: "integer", 
+              has_items: "boolean", is_visible: "boolean",  nom: "string", user_score: "integer", nb_steps: "integer", 
+              score_utilisateur: "integer", compteur: "integer", total_count: "float", speed: "float", nb_msgs: "integer", 
+              somme: "float", produit: "float", moyenne: "float", maximum: "float", quotient: "float",
+              minimum: "float", hauteur: "float", largeur: "float", longueur: "float", taille: "integer",
+              position: "integer", statut: "string", couleur: "string", date: "string", data_points: "float",
+              drapeau: "boolean", est_actif: "boolean", a_des_objets: "boolean", est_visible: "boolean",
+              est_complet: "boolean", est_valide: "boolean", login_attempts: "integer", my_variable: "float", 
+              cell_number: "integer", is_verified: "boolean", price_per_unit: "float"
+          },
+          operators: {
+              cocktail: ["+", "-", "+", "*", "//", "%","==", "!=", "<", ">", "<=", ">="],
+              logique: ["and", "or", "not"],
+              comparaison: ["==", "!=", "<", ">", "<=", ">="],
+              arithmetique: ["+", "-", "*", "//", "%"]
+          }
+      };
+      this.currentOperators = [];
+  }
 
+  generateDynamicExercise() {
+      this.resetExercise();
+      this.selectVariables();
+      this.generateExpressions();
+      return {
+          variables: this.variables,
+          expressions: this.expressions,
+          currentCorrectAnswers: this.currentCorrectAnswers
+      };
+  }
 
+  resetExercise() {
+      this.variables = [];
+      this.expressions = [];
+      this.currentCorrectAnswers = {};
+  }
 
+  selectVariables() {
+      const variableNames = Object.keys(this.myData.name_and_type);
+      while (this.variables.length < this.difficulty) {
+          const randomIndex = Math.floor(Math.random() * variableNames.length);
+          const variable = variableNames[randomIndex];
+          if (!this.variables.find(v => v.name === variable)) {
+              const type = this.myData.name_and_type[variable];
+              const value = this.initializeVariable(type);
+              this.variables.push({ name: variable, type, value });
+              this.expressions.push(`${variable} = ${this.formatValueForDisplay(value)}`);
+          }
+      }
+  }
 
+  generateExpressions() {
+      this.updateOperatorAvailability();
+      this.variables.forEach((variable, index) => {
+          const inputId = `inputValue${index + 1}`;
+          const isBoolean = variable.type === "boolean";
+          const operatorSet = isBoolean ? this.myData.operators.logique : this.currentOperators;
+          const operator = operatorSet[Math.floor(Math.random() * operatorSet.length)];
+          
+          let expression, evalResult;
 
+          if (isBoolean && operator === "not") {
+              expression = `${variable.name} = not ${variable.name}`;
+              evalResult = !variable.value;
+          } else {
+              const otherVariable = this.selectAppropriateVariable(variable);
+              const valueToUse = otherVariable ? otherVariable.value : this.getRandomBoolean();
+              expression = `${variable.name} = ${variable.name} ${operator} ${this.formatValueForDisplay(valueToUse)}`;
+              evalResult = this.evaluateExpression(variable.value, valueToUse, operator);
+          }
 
+          this.expressions.push(expression);
+          variable.value = evalResult;
+          this.currentCorrectAnswers[inputId] = typeof evalResult === 'boolean' ? this.formatValueForDisplay(evalResult) : evalResult.toString();
+      });
+      this.shuffleExpressions();
+  }
 
+  updateOperatorAvailability() {
+      const maxOperators = 2 * this.difficulty;
+      this.currentOperators = this.myData.operators.cocktail.slice(0, Math.min(maxOperators, this.myData.operators.cocktail.length));
+  }
 
+  initializeVariable(type) {
+      switch(type) {
+          case "integer":
+          case "float":
+          case "string":
+              return Math.floor(Math.random() * 11) - 0;
+          case "boolean":
+              return Math.random() < 0.5;
+          default:
+              return null;
+      }
+  }
 
+  formatValueForDisplay(value) {
+      if (typeof value === 'boolean') {
+          return value ? "True" : "False";
+      }
+      return value;
+  }
 
+  selectAppropriateVariable(currentVariable) {
+      return this.variables.find(v => v !== currentVariable && typeof v.value === (currentVariable.type === 'boolean' ? 'boolean' : 'number'));
+  }
 
+  getRandomBoolean() {
+      return Math.random() < 0.5;
+  }
 
+  evaluateExpression(left, right, operator) {
+      try {
+          switch(operator) {
+              case "and": return left && right;
+              case "or": return left || right;
+              case "not": return !left;
+              case "+":
+              case "-":
+              case "*":
+                  return eval(`${left} ${operator} ${right}`);
+              case "//":
+                  if (right === 0 || right === false ) return "Error: Division by zero";
+                  return Math.floor(left / right);
+              case "%":
+                  if (right === 0 || right === false) return "Error: Division by zero";
+                  return left % right;
+              default:
+                  return eval(`${left} ${operator} ${right}`);
+          }
+      } catch (e) {
+          console.error('Erreur:', e.message);
+          return "Error: Invalid expression";
+      }
+  }
 
+  shuffleExpressions() {
+      for (let i = this.expressions.length - 1; i > this.difficulty - 1; i--) {
+          const j = this.difficulty + Math.floor(Math.random() * (i - this.difficulty + 1)); //* (i + 1) OU BIEN sans les blancs espaces blancs: (i - this.difficulty + 1)
+          [this.expressions[i], this.expressions[j]] = [this.expressions[j], this.expressions[i]];
+      }
+  }
+}
 
+class UIManager {
+  constructor(exerciseGenerator, answerHandler) {
+      this.exerciseGenerator = exerciseGenerator;
+      this.answerHandler = answerHandler;
+      this.codeDisplay = document.getElementById('code-display');
+      this.container = document.querySelector('.exercise-container');
+      this.difficultySlider = document.getElementById('difficultyLevel');
+      this.variableCountDisplay = document.getElementById('variableCount');
+      this.setupEventListeners();
+  }
 
+  setupEventListeners() {
+      document.getElementById('generate-button').addEventListener('click', () => this.generateNewExercise());
+      document.getElementById('verify-button').addEventListener('click', () => this.answerHandler.verifyAnswers());
+      document.getElementById('show-button').addEventListener('click', () => this.answerHandler.showAnswers());
+      this.difficultySlider.addEventListener('input', (e) => this.handleDifficultyChange(e.target.value));
+  }
 
+  generateNewExercise() {
+      const exercise = this.exerciseGenerator.generateDynamicExercise();
+      this.updateUIWithExercise(exercise);
+  }
+
+  updateUIWithExercise(exercise) {
+      this.codeDisplay.textContent = exercise.expressions.join('\n');
+      this.clearInputGroups();
+      this.createInputGroups(exercise);
+  }
+
+  clearInputGroups() {
+      this.container.querySelectorAll('.input-group').forEach(el => el.remove());
+  }
+
+  createInputGroups(exercise) {
+      exercise.variables.forEach((variable, index) => {
+          const inputGroup = this.createInputGroup(variable, index);
+          this.container.appendChild(inputGroup);
+      });
+  }
+
+  createInputGroup(variable, index) {
+      const inputGroup = document.createElement('div');
+      inputGroup.className = 'input-group';
+
+      const labelElement = document.createElement('label');
+      labelElement.htmlFor = `inputValue${index + 1}`;
+      labelElement.textContent = `${variable.name}:`;
+
+      const inputElement = document.createElement('input');
+      inputElement.type = 'text';
+      inputElement.id = `inputValue${index + 1}`;
+      inputElement.placeholder = `Valeur finale de ${variable.name}`;
+
+      const errorCheckbox = document.createElement('input');
+      errorCheckbox.type = 'checkbox';
+      errorCheckbox.id = `errorCheckbox${index + 1}`;
+      
+      const errorLabel = document.createElement('label');
+      errorLabel.htmlFor = `errorCheckbox${index + 1}`;
+      errorLabel.textContent = "Erreur ?";
+
+      inputGroup.append(labelElement, inputElement, errorCheckbox, errorLabel);
+      return inputGroup;
+  }
+
+  handleDifficultyChange(value) {
+      this.updateVariableCount(value);
+      this.updateRangeColor(value);
+      this.exerciseGenerator.difficulty = parseInt(value);
+      this.generateNewExercise();
+  }
+
+  updateVariableCount(value) {
+      this.variableCountDisplay.textContent = value;
+  }
+
+  updateRangeColor(value) {
+      const max = parseInt(this.difficultySlider.max);
+      const min = parseInt(this.difficultySlider.min);
+      const fraction = (value - min) / (max - min);
+      const red = Math.round(250 * fraction);
+      const green = Math.round(250 * (1 - fraction));
+      const blue = 50;
+      this.difficultySlider.style.background = `linear-gradient(to right, rgb(${red}, ${green}, ${blue}) ${fraction * 100}%, #ddd ${fraction * 100}%)`;
+  }
+}
+
+class AnswerHandler {
+  constructor(exerciseGenerator) {
+      this.exerciseGenerator = exerciseGenerator;
+  }
+
+  verifyAnswers() {
+      document.querySelectorAll('.input-group').forEach(group => {
+          const input = group.querySelector('input[type="text"]');
+          const errorCheckbox = group.querySelector('input[type="checkbox"]');
+          const userAnswer = input.value.trim();
+          const correctAnswer = this.exerciseGenerator.currentCorrectAnswers[input.id];
+          
+          this.updateInputStyle(input, errorCheckbox, userAnswer, correctAnswer);
+      });
+  }
+
+  updateInputStyle(input, errorCheckbox, userAnswer, correctAnswer) {
+      if (errorCheckbox.checked) {
+          if (correctAnswer === "Error: Division by zero" && userAnswer === "") {
+              input.style.backgroundColor = 'lightgreen';
+          } else if (correctAnswer === "Error: Division by zero") {
+              input.style.backgroundColor = '';
+          } else {
+              input.style.backgroundColor = 'salmon';
+          }
+      } else {
+          if (userAnswer === "") {
+              input.style.backgroundColor = "";
+          } else if (userAnswer === correctAnswer) {
+              input.style.backgroundColor = 'lightgreen';
+          } else {
+              input.style.backgroundColor = 'salmon';
+          }
+      }
+  }
+
+  showAnswers() {
+      document.querySelectorAll('.input-group').forEach(group => {
+          const input = group.querySelector('input[type="text"]');
+          const errorCheckbox = group.querySelector('input[type="checkbox"]');
+          const correctAnswer = this.exerciseGenerator.currentCorrectAnswers[input.id];
+
+          if (correctAnswer.startsWith("Error")) {
+              errorCheckbox.checked = true;
+              input.value = "";
+              input.style.backgroundColor = 'lightgray';
+          } else {
+              input.value = correctAnswer;
+              input.style.backgroundColor = 'lightgray';
+          }
+      });
+  }
+}
+/* fin de mes classes "Exerciseur" */
+
+/* J'ajoute l'initialisation de l'exerciseur à l'événement DOMContentLoaded */
+document.addEventListener('DOMContentLoaded', function() {
+  // Initialisation de l'exerciseur
+  const exerciseGenerator = new ExerciseGenerator(3);
+  const answerHandler = new AnswerHandler(exerciseGenerator);
+  const uiManager = new UIManager(exerciseGenerator, answerHandler);
+  
+  uiManager.generateNewExercise();
+
+  // Associer les boutons à leurs fonctions respectives
+  document.getElementById('verify-button').addEventListener('click', verifyAnswers);
+  document.getElementById('show-button').addEventListener('click', showAnswers);
+  document.getElementById('generate-button').addEventListener('click', generateDynamicExercise);
+  // Générer un exercice au chargement de la page
+  generateDynamicExercise();
+});
 
 
 /* Création du contenu des modules Python */
@@ -542,4 +842,24 @@ http://s15847115.domainepardefaut.fr/python/
    }
 
 
+class ExerciceModule extends HTMLElement {
+  constructor() {
+    super();
+    let template = document.getElementById('mon-exercice');
+    this.appendChild(template.content.cloneNode(true));
+    this.generateButton = this.querySelector('#generate-button');
+    this.verifyButton = this.querySelector('#verify-button');
+    this.showButton = this.querySelector('#show-button');
+    this.codeDisplay = this.querySelector('#code-display');
 
+    this.generateButton.addEventListener('click', generateDynamicExercise);
+    this.verifyButton.addEventListener('click', verifyAnswers);
+    this.showButton.addEventListener('click', showAnswers);
+  }
+
+  connectedCallback() {
+    generateDynamicExercise();
+  }
+}
+
+customElements.define('bloc-exercice', ExerciceModule);
