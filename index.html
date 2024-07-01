@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Editeur Python en ligne</title>
-    <meta name=author" content="Laurent COOPER">
+    <meta name=author" content="Julien MATEESCO - source HTML, CSS: Laurent COOPER">
     <meta name="description" content="Editeur Python basé sur pythonexec">
     <meta name="keywords" content="Skulpt, Python, Javascript, pythonexec">
     <link href="css/favicon.ico" rel="icon" type="image/x-icon" />
@@ -14,17 +14,123 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/labjs/2.0.3/LAB.min.js"
         integrity="sha512-kbAlSEb5smG4AhoWpDe6DH+II2Z0rzX0YWMFgk8gIN5gw2xcAxPHRZ0Zn1dfhmKFFN+Vk64jteqDkQQOJvo0qg=="
         crossorigin="anonymous"></script>
+
     <!-- Python exec-->
     <script src="js/pythonexec.js"></script>
+    <!-- Script pour les exercices dynamiques -->
+    <script src="js/mon_script.js" defer></script>
 
-
+    <style>
+        .exercise-container {
+            margin: auto;
+            width: 50%;
+            border: 1px solid #ddd;
+            padding: 20px;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+        }
+        .input-group {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .range-container {
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+        input[type="text"], input[type="range"] {
+            padding: 10px;
+            margin-right: 5px;
+            flex: 1;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #ddd;
+            outline: none;
+            transition: background 0.9s; /* transition: all 1s ease-out; */
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+        }
+        input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        button {
+            padding: 15px 10px;
+            margin-right: 5px;
+            border: none;
+            cursor: pointer;
+        }
+        .button-new-exercise {
+            background-color: #007BFF;
+            color: white;
+        }
+        .button-verify {
+            background-color: #28a745;
+            color: white;
+        }
+        .button-show-answers {
+            background-color: #6c757d;
+            color: white;
+        }
+        button:hover {
+            opacity: 0.7;
+        }
+        pre {
+            background-color: #f8f8f8;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        label {
+            padding: 10px;
+            flex: 0 0 20%;
+            margin-right: 10px;
+        }
+        #variableCount {
+            padding: 10px;
+            min-width: 40px;
+            text-align: center;
+        }
+    </style>
 </head>
 
-<body style="background-image: url('css/back.png')">
+<body style="background-image: url('css/back2.png')">
     <main class="container mb-5" role="main">
         <bloc-python>
             # Placez votre code ici puis cliquez sur le bouton "Exécuter".
         </bloc-python>
+        <!-- Section pour les exercices dynamiques -->
+        <div class="exercise-container">
+            <h2>Exercices automatiques d'assignation de variables</h2>
+            <p>Que valent les variables à la fin de l'exécution du `code Python` ci-dessous ?</p>
+            <label for="difficultyLevel">Niveau de difficulté (de 1 à 6):</label>
+            <input type="range" id="difficultyLevel" min="1" max="6" value="3">
+            <span id="variableCount">3</span>
+            <pre id="code-display">Exemple de code</pre>
+            <button id="verify-button" class="button-verify">Vérifier</button>
+            <button id="show-button" class="button-show-answers">Montrer les réponses</button>
+            <button id="generate-button" class="button-new-exercise">Nouvel exercice</button>
+        </div>
     </main>
+    
 </body>
 </html>
