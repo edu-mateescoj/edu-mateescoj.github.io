@@ -341,8 +341,7 @@ class PythonModule extends HTMLElement {
       };
     }
 
-
-
+   // Initialize the ACE editor
     //this.acediv.style.minHeight = "20rem";
     this.editor = ace.edit(this.acediv);
     this.editor.setTheme("ace/theme/xcode");/*MOD*/
@@ -362,6 +361,7 @@ class PythonModule extends HTMLElement {
     if (python != "" && python != null) {
       var httpRequest = new XMLHttpRequest();
       httpRequest.onreadystatechange = (function (elt, xhr) {
+        //quelle data ??
         return function (data) {
           var DONE = 4; // readyState 4 means the request is done.
           var OK = 200; // status 200 is a successful return.
@@ -391,7 +391,6 @@ class PythonModule extends HTMLElement {
       this.acediv.classList.add('pyexec-small');
     }
 
-/*MOD*/
     if (this.hasAttribute('moyen')) {
       this.pythondiv.classList.add('pyexec-moyen');
       this.graphicdiv.classList.add('pyexec-moyen');
@@ -724,13 +723,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
 /* Création du contenu des modules Python */
 document.addEventListener('templateLoaded', function (e) {
-
+  customElements.define('bloc-python', PythonModule);
   customElements.define('bloc-cours', Cours);
   customElements.define('bloc-attention', Attention);
   customElements.define('bloc-retenir', Retenir);
   customElements.define('bloc-consigne', Consigne);
   customElements.define('bloc-markdown', MarkdownBlock);
-  customElements.define('bloc-python', PythonModule);
 });
 
 document.addEventListener('bloc-loaded', function (e) {
