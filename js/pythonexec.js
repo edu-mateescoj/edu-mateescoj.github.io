@@ -778,7 +778,7 @@ puis mettre le chemin vers editeur/templates:
 <script>pythonexec_template_dir="blabla/editeur/templates";</script>
 dans le fichier qui n'est pas dans la racine
 */
-    httpRequest.open("GET", "../js/blocs.html");/*MOD*/
+    httpRequest.open("GET", "blocs.html");/*MOD "../js/blocs.html" */
     httpRequest.send();
   });
 
