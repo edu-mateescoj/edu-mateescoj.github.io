@@ -126,7 +126,8 @@ class PythonModule extends HTMLElement {
     // clone template
     let myTemplate = document.getElementById('mon-python');
     this.appendChild(myTemplate.content.cloneNode(true));
-
+    
+    // Assign an ID if not present
     function dec2hex(dec) {
       return ('0' + dec.toString(16)).substr(-2);
     }
@@ -164,8 +165,7 @@ class PythonModule extends HTMLElement {
     this.consoleTab = this.querySelector('[aria-controls="console"]');
     this.graphicTab = this.querySelector('[aria-controls="graphic"]');
 
-
-
+    // Event listeners for tab switching
     this.consoleTab.addEventListener('click', (function (elt) {
       return function (e) {
         elt.pythondiv.classList.add('show', 'active');
@@ -283,8 +283,8 @@ class PythonModule extends HTMLElement {
     }
 
     function mySave(e) {
-      console.log('Sauvegarde lancée !!')
       return function () {
+        console.log('Sauvegarde lancée !!')
         (function (elt) {
           if (elt.restoreButton.classList.contains('disabled')) {
             elt.restoreButton.classList.remove('disabled');
@@ -295,8 +295,8 @@ class PythonModule extends HTMLElement {
     }
 
     function myRestore(elt) {
-      console.log('Restauration lancée !!')
-        return function () {
+      return function () {
+        console.log('Restauration lancée !!')
         (function (elt) {
           elt.editor.setValue(elt.datas.savedPython);
         }(elt));
@@ -304,8 +304,8 @@ class PythonModule extends HTMLElement {
     }
 
     function myReload(elt) {
-      console.log('REcahrge lancée !!')
-        return function () {
+      return function () {
+        console.log('REcahrge lancée !!')
         (function (elt) {
           elt.editor.setValue(elt.datas.initialPython);
         }(elt));
@@ -313,8 +313,8 @@ class PythonModule extends HTMLElement {
     }
 
     function myDownload(elt) {
-      console.log('Download lancé !!')
       return function () {
+        console.log('Download lancé !!')
         (function (elt) {
           var blob = new Blob([elt.editor.getValue()], {
             type: "text/x-python;charset=utf-8"
