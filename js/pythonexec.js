@@ -283,6 +283,7 @@ class PythonModule extends HTMLElement {
     }
 
     function mySave(e) {
+      console.log('Sauvegarde lancée !!')
       return function () {
         (function (elt) {
           if (elt.restoreButton.classList.contains('disabled')) {
@@ -294,7 +295,8 @@ class PythonModule extends HTMLElement {
     }
 
     function myRestore(elt) {
-      return function () {
+      console.log('Restauration lancée !!')
+        return function () {
         (function (elt) {
           elt.editor.setValue(elt.datas.savedPython);
         }(elt));
@@ -302,7 +304,8 @@ class PythonModule extends HTMLElement {
     }
 
     function myReload(elt) {
-      return function () {
+      console.log('REcahrge lancée !!')
+        return function () {
         (function (elt) {
           elt.editor.setValue(elt.datas.initialPython);
         }(elt));
@@ -310,6 +313,7 @@ class PythonModule extends HTMLElement {
     }
 
     function myDownload(elt) {
+      console.log('Download lancé !!')
       return function () {
         (function (elt) {
           var blob = new Blob([elt.editor.getValue()], {
@@ -320,11 +324,11 @@ class PythonModule extends HTMLElement {
       };
     }
 
-/*MOD*/
     function myTheme(elt) {
       return function () {
+        console.log('Changement de thème lancé !!')
         (function (elt) {
-          console.log(elt.editor.getTheme());
+          console.log('Thème actuel: ', elt.editor.getTheme());
           if (elt.editor.getTheme() == "ace/theme/xcode")
               {
                 elt.editor.setTheme("ace/theme/monokai");
