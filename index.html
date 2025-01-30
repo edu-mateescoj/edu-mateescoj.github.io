@@ -251,7 +251,7 @@ function updateOperatorAvailability(num) {
                 evalResult = !variables[variable];
             } else {
                 otherVariable = selectAppropriateVariable(selectedVariables, variables, variable, isBoolean);
-                const valueToUse = otherVariable ? variables[otherVariable] : getRandomBoolean();
+                const valueToUse = otherVariable ? variables[otherVariable] : (isBoolean ? getRandomBoolean() : getRandomNumber());
                 expression = `${variable} = ${variable} ${operator} ${formatValueForDisplay(valueToUse)}`;
                 evalResult = evaluateExpression(variables[variable], valueToUse, operator);
             }
