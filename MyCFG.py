@@ -26,6 +26,10 @@ class ControlFlowGraph:
         # Stockage des ID de nœuds pour le flux principal (module), utilisé pour le sous-graphe Mermaid.
         self.main_flow_nodes: Set[str] = set()
 
+        # Dictionnaire pour stocker des informations sur les variables affectées à des littéraux
+        # Clef:= nom de la variable (str) - Valeur:= tuple (type_ast_node, valeur_reelle_ou_description_type)
+        # Ex: "my_string" -> (ast.Constant, "chaîne")
+        self.variable_assignments: Dict[str, Tuple[type, Any]] = {}
 
     def get_node_id(self) -> str:
         """Génère un nouvel ID de nœud unique et l'ajoute à la portée de fonction actuelle si applicable."""
@@ -43,6 +47,13 @@ class ControlFlowGraph:
     def add_node(self, label: str, node_type: str = "Process") -> str:
         """Ajoute un nouveau nœud au graphe."""
         node_id = self.get_node_id() # get_node_id gère l'ajout aux ensembles pour les sous-graphes
+        
+        # --- DEBUG ---
+        #import inspect
+        #caller_name = inspect.stack()[1].function
+        #print(f"DEBUG add_node: ID={node_id}, Label='{label}', Type='{node_type}', Called by='{caller_name}'")
+        # --- FIN DEBUG ---
+
         self.nodes.append((node_id, label))
         self.node_labels[node_id] = label
         self.node_types[node_id] = node_type
@@ -311,6 +322,7 @@ class ControlFlowGraph:
         return list(set(final_exit_nodes_after_if))
 
     def visit_For(self, node: ast.For, parent_id: str) -> List[str]: 
+        #print(f"DEBUG: visit_For pour {ast.unparse(node.target)} in ..., parent: {parent_id}")
         """Visite une boucle 'for' AST en distinguant les cas for .. in range(...)"""
         iterator_variable_str = ast.unparse(node.target).replace('"', '"')
         iterable_node = node.iter
@@ -318,11 +330,16 @@ class ControlFlowGraph:
         # Points de sortie de la boucle For (ceux qui mènent à l'instruction *après* la boucle).
         loop_overall_exit_points: List[str] = []
 
+        #print(f"DEBUG: visit_For - Juste avant le IF. iterator_variable_str = '{iterator_variable_str}'")
+        #print(f"DEBUG: visit_For - Juste avant le IF. type(iterable_node) = {type(iterable_node)}")
+        #if isinstance(iterable_node, ast.Constant):
+        #    print(f"DEBUG: visit_For - iterable_node.value = '{iterable_node.value}'")
+
         # Cas spécial pour for i in range(...) pour une représentation plus détaillée.
         if isinstance(iterable_node, ast.Call) and \
            isinstance(iterable_node.func, ast.Name) and \
            iterable_node.func.id == 'range':
-
+            #print(f"DEBUG: visit_For - Cas RANGE")
             range_args = iterable_node.args
             start_val_str = "0"; stop_val_str = ""; step_val_str = "1" # Valeurs par défaut pour range.
             if len(range_args) == 1: 
@@ -333,7 +350,10 @@ class ControlFlowGraph:
                 if len(range_args) == 3: 
                     step_val_str = ast.unparse(range_args[2]).replace('"', '#quot;')
             else: # Fallback si range() a un nombre inattendu d'arguments.
-                return self._visit_for_generic_iterable(node, parent_id, iterator_variable_str)
+                #print(f"DEBUG: visit_For - Cas FALLBACK GENERIC ITERABLE")
+                exits = self._visit_for_generic_iterable(node, parent_id, iterator_variable_str)
+                #print(f"DEBUG: visit_For - Cas FALLBACK GENERIC ITERABLE - return {exits}")
+                return exits
 
             # Nœud d'initialisation.
             init_label = f"{iterator_variable_str} = {start_val_str}"
@@ -411,33 +431,132 @@ class ControlFlowGraph:
                 
                 loop_overall_exit_points.extend(orelse_exit_nodes) # Les sorties de orelse sont des sorties globales.
             
+            if not node.orelse:
+                # Chercher la première arête sortante de loop_condition_id qui n'est pas "True"
+                # c'est l'arête sortante du losange '{condition}', correspondante à la sortie de boucle
+                for from_node, to_node, label in list(self.edges):
+                    if from_node == loop_condition_id and label == "":
+                        #print(f"Relabel DEBUG: {from_node} -> {to_node} ('' -> 'False')")
+                        # On relabelise cette arête en "False": on la supprime pour la recréer labellisée
+                        self.edges.remove((from_node, to_node, label))
+                        self.add_edge(from_node, to_node, "False")
+                        break  # Il ne doit y en avoir qu'une!!
+
             if false_branch_first_node_id: 
                 if (loop_condition_id, false_branch_first_node_id, "") in self.edges: 
                     self.edges.remove((loop_condition_id, false_branch_first_node_id, ""))
                 self.add_edge(loop_condition_id, false_branch_first_node_id, "False")
             # elif not node.orelse : Pas de orelse, l'arête "False" part de loop_condition_id vers la suite.
-                
+
+            # forcer qu'aucune arête sortante du losange ne soit sans label
+            for from_node, to_node, label in list(self.edges):
+                if from_node == loop_condition_id and label == "":
+                    self.edges.remove((from_node, to_node, label))
+                    self.add_edge(from_node, to_node, "False")
+
             self.loop_stack.pop() # Fin de la gestion de cette boucle.
+
+            #print(f"DEBUG: visit_For - Cas RANGE - return {loop_overall_exit_points}")
             return list(set(loop_overall_exit_points))   
+        
         else: # Itérable générique (non-range).
+            #print(f"DEBUG: visit_For - Cas GENERIC ITERABLE")
             return self._visit_for_generic_iterable(node, parent_id, iterator_variable_str)
+    
+        # Si on arrive ici, c'est qu'il manque un return dans une des branches du if/else !!!
+        #print(f"CRITICAL DEBUG: visit_For - Fin atteinte sans return explicite !")
+        return [] # Fallback pour éviter TypeError, mais indique un bug logique
+    
 
     def _visit_for_generic_iterable(self, node: ast.For, parent_id: str, iterator_variable_str: str) -> List[str]:
-        """Visite une boucle 'for' avec un itérable générique."""
-        iterable_text = ast.unparse(node.iter).replace('"', '"')
-        loop_decision_label = f"For {iterator_variable_str} in {iterable_text}"
-        loop_decision_id = self.add_node(loop_decision_label, node_type="Decision")
-        self.add_edge(parent_id, loop_decision_id)
-        
-        # La sortie "Terminée/Vide" de la boucle.
-        loop_overall_exit_points: List[str] = [loop_decision_id] 
+        """Visite une boucle 'for' avec un itérable générique : PAS un range() explicite.
+        Détaille la structure itérable & itérateur pour une description pédagogique.
+        Formulations à discuter..."""
 
-        # Pour un 'for' générique: 'continue' et re-test vont au nœud de décision.
-        # 'break' va aussi à la sortie "Terminée/Vide" de ce nœud.
-        self.loop_stack.append((loop_decision_id, loop_decision_id, loop_decision_id))
+        iterable_type_desc, elements_type_desc, iterable_display_name = \
+            self._get_iterable_description(node.iter)
 
+        # --- Nœuds de la structure de boucle ---
+        # 1. Première Décision: Y a-t-il des éléments ?
+        entry_decision_label = f"{iterable_type_desc} '{iterable_display_name}'<br>a des {elements_type_desc}s à traiter ?"
+        entry_decision_id = self.add_node(entry_decision_label, node_type="Decision")
+        self.add_edge(parent_id, entry_decision_id)
+
+        # 2. Initialisation de la variable locale au premier élément (si True à la première décision de rentrée dans l'itérable)
+        init_var_label = f"{iterator_variable_str} ← premier {elements_type_desc}<br>de la {iterable_type_desc} '{iterable_display_name}'"
+        init_var_id = self.add_node(init_var_label, node_type="Process")
+        # L'arête entry_decision_id --True--> init_var_id sera ajoutée après avoir identifié init_var_id
+
+        # Deux types de nœuds pour la suite de la structure
+        # test: on itère ? 
+        retest_decision_label = f"Encore un {elements_type_desc} à traiter<br>dans la {iterable_type_desc} '{iterable_display_name}' ?"
+        retest_decision_id = self.add_node(retest_decision_label, node_type="Decision")
+        # au cas où on itère:
+        next_var_label = f"{iterator_variable_str} ← {elements_type_desc} suivant<br>de la {iterable_type_desc} '{iterable_display_name}'"
+        next_var_id = self.add_node(next_var_label, node_type="Process")
+
+        # --- Connexions ---
+        loop_overall_exit_points: List[str] = []        
+        # Connexion de la première décision (entry_decision_id)
+        self.add_edge(entry_decision_id, init_var_id, "True") # Si éléments existent, initialiser
+        loop_overall_exit_points.append(entry_decision_id)   # La branche "False" de entry_decision_id est une sortie
+
+        # Mettre à jour la pile des boucles
+        #1. continue_target: retest_decision_id (on re-teste s'il y a un suivant AVANT de prendre le suivant)
+        #2. break_target: retest_decision_id (la sortie "False" de ce test est la sortie de boucle)
+        #3. retest_target (après le corps): retest_decision_id
+        self.loop_stack.append((retest_decision_id, retest_decision_id, retest_decision_id))
+
+        # 3. VISITER LE CORPS DE LA BOUCLE
+        # Le corps commence APRÈS l'initialisation de la variable avec le premier élément (init_var_id).
+        body_exit_nodes: List[str] = []
+        first_node_of_body: Optional[str] = None
+
+        if node.body:
+            nodes_before_body = {nid for nid, _ in self.nodes}
+            # Le corps est visité en partant de init_var_id
+            body_exit_nodes = self.visit_body(node.body, [init_var_id])
+            nodes_after_body = {nid for nid, _ in self.nodes}
+            new_nodes_in_body = sorted(
+                list(nodes_after_body - nodes_before_body),
+                key=lambda x: int(x.replace("node", ""))
+            )
+            if new_nodes_in_body:
+                first_node_of_body = new_nodes_in_body[0]
+                # S'assurer que l'arête init_var_id -> first_node_of_body n'a pas de label (ou le bon)
+                # visit_body crée cette arête via son premier appel à self.visit.
+                # On ne met pas de label "True" ici, c'est un flux direct après init_var_id.
+                if (init_var_id, first_node_of_body, "True") in self.edges: # Au cas où une logique l'aurait mis
+                    self.edges.remove((init_var_id, first_node_of_body, "True"))
+                    self.add_edge(init_var_id, first_node_of_body, "") # Flux direct
+
+            # Les sorties normales du corps mènent au nœud de re-test (retest_decision_id)
+            for exit_node in body_exit_nodes:
+                if exit_node not in self.terminal_nodes:
+                    self.add_edge(exit_node, retest_decision_id)
+        else: 
+            # Corps vide : init_var_id mène directement au retest_decision_id
+            self.add_edge(init_var_id, retest_decision_id)
+            body_exit_nodes = [init_var_id] # Pour la logique de retour de boucle
+
+        # Connexion de la deuxième décision (retest_decision_id)
+        self.add_edge(retest_decision_id, next_var_id, "True") # Si encore des éléments, prendre le suivant
+        loop_overall_exit_points.append(retest_decision_id) # La branche "False" de retest_decision_id est une sortie
+
+        # L'élément suivant (next_var_id) retourne au début du traitement du corps.
+        if first_node_of_body: # Si le corps n'était pas vide et qu'on a identifié son début
+            self.add_edge(next_var_id, first_node_of_body)
+        elif node.body : # Corps non vide, mais first_node_of_body non trouvé (ne devrait pas arriver)
+            print(f"Warning: Impossible de connecter next_var_id au début du corps de la boucle for {iterator_variable_str}")
+            self.add_edge(next_var_id, retest_decision_id) # Fallback moins précis
+        else: # Corps vide, next_var_id retourne directement au retest
+            self.add_edge(next_var_id, retest_decision_id)
+
+# AVANT 
+        '''
         # Visiter le corps (branche "itération").
         iteration_branch_first_node_id: Optional[str] = None
+
         if node.body:
             nodes_before_body = {nid for nid,_ in self.nodes}
             body_exit_nodes = self.visit_body(node.body, [loop_decision_id])
@@ -450,36 +569,52 @@ class ControlFlowGraph:
             for exit_node in body_exit_nodes:
                 if exit_node not in self.terminal_nodes:
                     self.add_edge(exit_node, loop_decision_id) 
-        
+
+
         if iteration_branch_first_node_id:
             if (loop_decision_id, iteration_branch_first_node_id, "") in self.edges: 
                 self.edges.remove((loop_decision_id, iteration_branch_first_node_id, ""))
             self.add_edge(loop_decision_id, iteration_branch_first_node_id, "itération")
         elif not node.body: # Corps vide, la branche "itération" revient directement au test.
              self.add_edge(loop_decision_id, loop_decision_id, "itération")
-
+        '''
 
         # Gérer 'orelse' (sortie "Terminée/Vide").
-        terminated_branch_first_node_id: Optional[str] = None
+        ## terminated_branch_first_node_id: Optional[str] = None
+        
         if node.orelse:
-            if loop_decision_id in loop_overall_exit_points:
-                loop_overall_exit_points.remove(loop_decision_id) # orelse remplace la sortie directe.
+            # orelse est exécuté après que retest_decision_id est False.
+            # Donc, la branche "False" de retest_decision_id mène à orelse.
+            if retest_decision_id  in loop_overall_exit_points:
+                loop_overall_exit_points.remove(retest_decision_id ) # orelse remplace la sortie directe.
             
+            # Labelliser l'arête retest_decision_id -> début de orelse avec "False"
             nodes_before_orelse = {nid for nid,_ in self.nodes}
-            orelse_exit_nodes = self.visit_body(node.orelse, [loop_decision_id])
+            orelse_exit_nodes = self.visit_body(node.orelse, [retest_decision_id])
             nodes_after_orelse = {nid for nid,_ in self.nodes}
             new_nodes_in_orelse = sorted(list(nodes_after_orelse - nodes_before_orelse), key=lambda x: int(x.replace("node","")))
+            
             if new_nodes_in_orelse:
-                terminated_branch_first_node_id = new_nodes_in_orelse[0]
+                first_node_orelse  = new_nodes_in_orelse[0]
+                if (retest_decision_id, first_node_orelse, "") in self.edges:
+                    self.edges.remove((retest_decision_id, first_node_orelse, ""))
+                self.add_edge(retest_decision_id, first_node_orelse, "False")
+            elif not orelse_exit_nodes : # orelse est vide mais existe
+                 # L'arête False de retest_decision_id pointe vers la suite
+                 # On doit s'assurer que retest_decision_id est une sortie si orelse est vide
+                 loop_overall_exit_points.append(retest_decision_id) 
+            # else: Si pas de orelse, la branche "False" de retest_decision_id est déjà une sortie via loop_overall_exit_points.
+
+            # Les sorties de orelse sont des sorties globales.
             loop_overall_exit_points.extend(orelse_exit_nodes)
         
-        if terminated_branch_first_node_id:
+        '''if terminated_branch_first_node_id:
             if (loop_decision_id, terminated_branch_first_node_id, "") in self.edges: 
                 self.edges.remove((loop_decision_id, terminated_branch_first_node_id, ""))
             self.add_edge(loop_decision_id, terminated_branch_first_node_id, "Terminée / Vide")
         # elif not node.orelse: L'arête "Terminée / Vide" sera implicite via loop_overall_exit_points.
-
-        self.loop_stack.pop()
+'''
+        self.loop_stack.pop() # Fin de la gestion de cette boucle.
         return list(set(loop_overall_exit_points))
     
     def visit_While(self, node: ast.While, parent_id: str) -> List[str]: 
@@ -571,6 +706,7 @@ class ControlFlowGraph:
         return [continue_node_id] # visit() le marquera comme terminal.
 
     def generic_visit(self, node: ast.AST, parent_id: str) -> List[str]:
+        print(f"DEBUG: generic_visit appelée pour {type(node).__name__} (parent: {parent_id})")
         """Visiteur par défaut pour les nœuds AST non gérés spécifiquement."""
         try:
             # Essayer de générer une étiquette à partir du code source du nœud.
@@ -604,6 +740,55 @@ class ControlFlowGraph:
         label_text = f"{targets_str} = {value_str}"
         node_type = "Process"
 
+        value_node = node.value
+        value_str_for_label = ast.unparse(value_node).replace('"', '"') if value_node else ""
+        
+        # Tenter de stocker des informations sur l'affectation pour une inférence de type ultérieure
+        for target_node in node.targets:
+            if isinstance(target_node, ast.Name): # Cible d'affectation simple (variable).
+                var_name = target_node.id
+                assigned_value_type_ast = type(value_node) # Le type du noeud AST (ast.Constant, ast.List, etc.)
+                # On stocke le type du noeud AST et une représentation de la valeur
+                # Pour les constantes, on peut stocker la valeur réelle
+                # Pour les listes/tuples, on pourrait stocker une description ou les types des éléments
+                if isinstance(value_node, ast.Constant):
+                    self.variable_assignments[var_name] = (assigned_value_type_ast, value_node.value)
+                elif isinstance(value_node, (ast.List, ast.Tuple, ast.Set)):
+                    # Pour les collections, on pourrait analyser les éléments ici ou simplement stocker le type de collection.
+                    # Pour l'instant, stockons juste le type AST
+                    self.variable_assignments[var_name] = (assigned_value_type_ast, type(value_node).__name__)
+                elif isinstance(value_node, ast.Name):
+                    source_var_name = value_node.id
+                    if source_var_name in self.variable_assignments:
+                        # Propager l'information de la variable source
+                        self.variable_assignments[var_name] = self.variable_assignments[source_var_name]
+                    else:
+                        # On ne connaît pas le type de la variable source, donc on ne stocke rien de précis pour var_name
+                        self.variable_assignments[var_name] = (ast.Name, "variable (type inconnu)") # Ou autre??
+                elif isinstance(value_node, ast.Call):
+                    # Tenter d'inférer le type de retour si c'est une fonction connue
+                    func_name_str = ast.unparse(value_node.func) # Peut être complexe (ex: obj.method)
+                    # Heuristique simple pour les builtins courants
+                    if isinstance(value_node.func, ast.Name):
+                        called_func_name = value_node.func.id
+                        if called_func_name in ['len','int']:
+                            self.variable_assignments[var_name] = (ast.Call, "nombre (entier)") # len retourne un int
+                        elif called_func_name in ['str', 'upper', 'lower', 'chr', 'type']:
+                            self.variable_assignments[var_name] = (ast.Call, "chaîne")
+                        elif called_func_name in ['sum', 'min', 'max', 'abs', 'ord', 'float', 'pow']:
+                            self.variable_assignments[var_name] = (ast.Call, "nombre")
+                        else:
+                            self.variable_assignments[var_name] = (ast.Call, f"résultat de {called_func_name}()")
+                    else:
+                        self.variable_assignments[var_name] = (ast.Call, f"résultat d'appel de fonction")
+
+
+        # --- Création du noeud pour l'instruction d'assignation elle-même ---
+        targets_str_for_label = ", ".join([ast.unparse(t).replace('"', '"') for t in node.targets])
+        label_text = f"{targets_str_for_label} = {value_str_for_label}"
+        node_type_for_assign_node = "Process" # Type par défaut pour les assignations.
+
+
         max_label_length = 60
         if len(label_text) > max_label_length:
              # Tenter de raccourcir la partie droite (valeur) en premier.
@@ -614,7 +799,7 @@ class ControlFlowGraph:
              else: # Sinon, raccourcir le tout.
                  label_text = label_text[:max_label_length-3] + "..."
         
-        assign_node_id = self.add_node(label_text, node_type=node_type)
+        assign_node_id = self.add_node(label_text, node_type=node_type_for_assign_node)
         self.add_edge(parent_id, assign_node_id)
         return [assign_node_id]
 
@@ -641,7 +826,7 @@ class ControlFlowGraph:
         all_args_concatenated_str = ", ".join(args_list_str + kwargs_list_str)
         
         # Tronquer la chaîne des arguments si elle est trop longue.
-        max_args_display_length = 30 
+        max_args_display_length = 60 
         if len(all_args_concatenated_str) > max_args_display_length: 
             all_args_concatenated_str = all_args_concatenated_str[:max_args_display_length-3] + "..."
         
@@ -657,6 +842,121 @@ class ControlFlowGraph:
         call_node_id = self.add_node(label_text, node_type=node_type)
         self.add_edge(parent_id, call_node_id)
         return [call_node_id]
+
+    def _get_iterable_description(self, iterable_node: ast.AST) -> Tuple[str, str, str]:
+        iterable_type_desc = "itérable" 
+        elements_type_desc = "élément"
+        # iterable_name_or_literal est le texte qui sera affiché pour l'itérable
+        # Si c'est une variable, ce sera 'nom_var'. Si c'est un littéral, ce sera sa représentation textuelle.
+        iterable_name_or_literal = ast.unparse(iterable_node).replace('"', '#quot;') 
+
+        actual_node_to_inspect = iterable_node # Le noeud AST qu'on va réellement analyser pour son type
+        original_iterable_name_if_any = None # pour garder une trace si l'itérable d'origine était une variable (la variable est un ast.Name)
+
+        if isinstance(iterable_node, ast.Name):
+            original_iterable_name_if_any = iterable_node.id
+            # Pour l'affichage, on veut le nom de la variable, pas sa valeur potentielle
+            iterable_name_or_literal = f"'{iterable_node.id}'" 
+            
+            if iterable_node.id in self.variable_assignments:
+                assigned_ast_type, assigned_value_or_desc = self.variable_assignments[iterable_node.id]
+                
+                # Maintenant, on essaie de "reconstituer" un noeud AST ou une description
+                # basée sur ce qui a été stocké pour cette variable.
+                if assigned_ast_type == ast.Constant:
+                    # La variable a été affectée à une constante
+                    if isinstance(assigned_value_or_desc, str):
+                        # On traite la variable comme si elle contenait cette chaîne littérale
+                        actual_node_to_inspect = ast.Constant(value=assigned_value_or_desc)
+                        iterable_type_desc = f"chaîne" #  (via var {iterable_name_or_literal}) # Plus précis
+                    # Ajouter d'autres types de constantes si stockés (int, float, bool)
+                    # Cependant, itérer sur un int/float/bool n'est pas typique pour un 'for in'.
+                elif assigned_ast_type == ast.List:
+                    iterable_type_desc = f"liste" # (via var {iterable_name_or_literal})
+                    # Si assigned_value_or_desc contenait les types des éléments, on pourrait les utiliser.
+                    # Pour l'instant, on ne peut pas reconstruire les elts pour actual_node_to_inspect.
+                    # On va donc se baser sur le fait que c'est une "liste" et garder elements_type_desc par défaut.
+                    # On pourrait avoir stocké une description comme "liste de nombres"
+                    if isinstance(assigned_value_or_desc, str) and "liste de" in assigned_value_or_desc:
+                        # Ex: "liste de nombres" -> elements_type_desc = "nombre"
+                        if "nombres" in assigned_value_or_desc: elements_type_desc = "nombre"
+                        elif "chaînes" in assigned_value_or_desc: elements_type_desc = "chaîne"
+                        # etc.
+                    else: # Fallback si c'est juste le type de collection
+                         elements_type_desc = "élément"
+                    # On ne change pas actual_node_to_inspect ici si on n'a pas les elts.
+                elif assigned_ast_type == ast.Tuple:
+                    iterable_type_desc = f"le tuple" #  (via var {iterable_name_or_literal})
+                    elements_type_desc = "élément"
+                elif assigned_ast_type == ast.Set:
+                    iterable_type_desc = f"l'ensemble" # (via var {iterable_name_or_literal})
+                    elements_type_desc = "élément"
+                elif assigned_ast_type == ast.Dict:
+                    iterable_type_desc = f"le dictionnaire" # (via var {iterable_name_or_literal})
+                    elements_type_desc = "clé"
+                elif assigned_ast_type == ast.Call: # La variable vient d'un appel de fonction
+                    iterable_type_desc = f"{assigned_value_or_desc} (via var {iterable_name_or_literal})"
+                    elements_type_desc = "élément" # On ne sait pas plus
+                # Si assigned_ast_type est ast.Name (b = a), on a propagé. actual_node_to_inspect reste le Name.
+                # La description sera "la variable 'nom_var'".
+
+        # --- Analyse de actual_node_to_inspect (qui peut être l'original ou un reconstitué) ---
+        if isinstance(actual_node_to_inspect, ast.Constant):
+            if isinstance(actual_node_to_inspect.value, str):
+                # Si ce n'est pas déjà mis par la logique de variable ci-dessus
+                if iterable_type_desc == "itérable": iterable_type_desc = "chaîne"
+                if elements_type_desc == "élément": elements_type_desc = "caractère"
+        elif isinstance(actual_node_to_inspect, ast.List):
+            if iterable_type_desc == "itérable": iterable_type_desc = "liste"
+            if hasattr(actual_node_to_inspect, 'elts') and actual_node_to_inspect.elts:
+                element_types_seen = set()
+                # ... (votre logique existante pour analyser les elts d'une liste littérale) ...
+                # (Assurez-vous qu'elle fonctionne bien avec les elts potentiellement vides si actual_node_to_inspect
+                # a été simulé à partir de variable_assignments sans les elts détaillés)
+                first_el_type_str = None
+                all_same = True
+                for elt_node in actual_node_to_inspect.elts:
+                    current_el_type_str = "mixte"
+                    if isinstance(elt_node, ast.Constant):
+                        if isinstance(elt_node.value, int): current_el_type_str = "nombre"
+                        elif isinstance(elt_node.value, float): current_el_type_str = "nombre"
+                        elif isinstance(elt_node.value, str): current_el_type_str = "chaîne"
+                        elif isinstance(elt_node.value, bool): current_el_type_str = "booléen"
+                    elif isinstance(elt_node, ast.Name): current_el_type_str = "variable" # Un élément est une autre variable
+                    element_types_seen.add(current_el_type_str)
+                
+                if len(element_types_seen) == 1:
+                    elements_type_desc = element_types_seen.pop()
+                elif element_types_seen: # Au moins un type a été vu
+                    elements_type_desc = "élément mixte"
+                # else: elements_type_desc reste "élément" (liste vide ou types non identifiables)
+
+        elif isinstance(actual_node_to_inspect, ast.Tuple):
+            if iterable_type_desc == "itérable": iterable_type_desc = "le tuple"
+            if elements_type_desc == "élément": elements_type_desc = "élément de tuple"
+        elif isinstance(actual_node_to_inspect, ast.Set):
+            if iterable_type_desc == "itérable": iterable_type_desc = "l'ensemble"
+            if elements_type_desc == "élément": elements_type_desc = "élément d'ensemble"
+        elif isinstance(actual_node_to_inspect, ast.Dict):
+            if iterable_type_desc == "itérable": iterable_type_desc = "le dictionnaire"
+            if elements_type_desc == "élément": elements_type_desc = "clé"
+        elif isinstance(actual_node_to_inspect, ast.Name) and original_iterable_name_if_any is None: # C'était un Name dès le début
+            iterable_type_desc = f"variable {iterable_name_or_literal}"
+            # elements_type_desc reste "élément"
+        elif isinstance(actual_node_to_inspect, ast.Call):
+            # Si ce n'est pas déjà mis par la logique de variable
+            if iterable_type_desc == "itérable":
+                func_name = ast.unparse(actual_node_to_inspect.func).replace('"', '#quot;')
+                iterable_type_desc = f"le résultat de {func_name}()"
+            # elements_type_desc reste "élément"
+        
+        # Si on a un nom original et que la description est encore générique, utiliser le nom.
+        if original_iterable_name_if_any and iterable_type_desc == "itérable":
+            iterable_type_desc = f"variable {iterable_name_or_literal}"
+
+        # Pour l'affichage final, on utilise iterable_name_or_literal qui est soit le nom de la variable
+        # soit la représentation textuelle du littéral.
+        return iterable_type_desc, elements_type_desc, iterable_name_or_literal.strip("'") # Enlever les ' ajoutés pour les noms
 
     def _simplify_junctions(self) -> Tuple[List[Tuple[str, str]], Set[Tuple[str, str, str]]]:
         """
@@ -717,19 +1017,20 @@ class ControlFlowGraph:
         # Pour activer la simplification (si des jonctions 1-1 étaient créées) :
         # display_nodes_tuples, display_edges = self._simplify_junctions()
         display_nodes_tuples = self.nodes
-        display_edges = self.edges
-        
+        display_edges = set(self.edges)  # Copie pour modification
+
+        ###################
         mermaid_lines = ["graph TD"] # Orientation de haut en bas.
         
         # Définitions de style pour les types de nœuds.
         mermaid_lines.extend([
-            "    classDef StartEnd fill:#999,stroke:#fff,stroke-width:2px;",
-            "    classDef Decision fill:#999,stroke:#fff,stroke-width:2px;",
-            "    classDef Process fill:#999,stroke:#fff,stroke-width:2px;",
-            "    classDef IoOperation fill:#999,stroke:#fff,stroke-width:2px;",
-            "    classDef Junction fill:#999,stroke:#fff,stroke-width:1px;", # Cercle pour jonction.
-            "    classDef Return fill:#999,stroke:#fff,stroke-width:2px;",
-            "    classDef Jump fill:#999,stroke:#fff,stroke-width:2px;"
+            "    classDef StartEnd fill:#555,stroke:#fff,stroke-width:2px;",
+            "    classDef Decision fill:#555,stroke:#fff,stroke-width:2px;",
+            "    classDef Process fill:#555,stroke:#fff,stroke-width:2px;",
+            "    classDef IoOperation fill:#555,stroke:#fff,stroke-width:2px;",
+            "    classDef Junction fill:#555,stroke:#fff,stroke-width:1px;", # Cercle pour jonction.
+            "    classDef Return fill:#555,stroke:#fff,stroke-width:2px;",
+            "    classDef Jump fill:#555,stroke:#fff,stroke-width:2px;"
         ])
 
         # --- Sous-graphe pour le Flux Principal ---
@@ -762,6 +1063,21 @@ class ControlFlowGraph:
             node_style_lines.append(f'    class {node_id} {node_type};')
         mermaid_lines.extend(sorted(list(set(node_style_lines)))) # set pour dédupliquer.
 
+##############
+# --- correction finale des labels d'arêtes sortantes des décisions ---
+        # pas réussi à m'assurer que les arêtes sortantes des décisions aient un label "False"
+        # Si une décision a une arête sortante sans label, on la relabelise en "False".
+        decision_nodes = {nid for nid, typ in self.node_types.items() if typ == "Decision"}
+        relabeled_edges = set()
+        for from_node, to_node, label in list(display_edges):
+            if from_node in decision_nodes and label == "":
+                # Relabel en "False"
+                display_edges.remove((from_node, to_node, label))
+                relabeled_edges.add((from_node, to_node, "False"))
+        display_edges = display_edges | relabeled_edges
+# --- fin de la correction des labels d'arêtes sortantes des décisions ---      
+        
+
         # --- Définition des Arêtes ---
         edge_definitions = []
         for from_node, to_node, edge_label_text in display_edges:
@@ -777,52 +1093,24 @@ class ControlFlowGraph:
                 edge_definitions.append(f"    {from_node} --> {to_node}")
         
         mermaid_lines.extend(sorted(list(set(edge_definitions)))) # set pour dédupliquer.
+        print("\n--- DEBUG: Arêtes envoyées à Mermaid ---")
+        for e in display_edges:
+            print(e)
         return "\n".join(mermaid_lines)
 
     def _get_mermaid_node_shape(self, node_type: str, label: str) -> Tuple[str, str]:
         """Helper pour obtenir les délimiteurs de forme Mermaid en fonction du type de nœud."""
         shape_open = "[" ; shape_close = "]" # Forme par défaut (rectangle).
-        if node_type == "StartEnd": shape_open, shape_close = "((", "))" # Stade.
+        if node_type == "StartEnd": shape_open, shape_close = "(((", ")))" # cercle doublé
         elif node_type == "Decision": shape_open, shape_close = "{", "}" # Losange.
         elif node_type == "Junction": 
             # Si la jonction n'a pas de label ou un label générique "Junction", la rendre petite (cercle).
-            if not label or label in {"Junction", "#quot;Junction#quot;", "."}: 
+            if not label or label == "Junction" or label == "#quot;Junction#quot;": 
                 shape_open, shape_close = "((", "))" # Petit cercle.
                 # safe_label = "" # Rendre la jonction sans texte (déjà géré par le label vide).
-            else: # Jonction avec un label spécifique (rare).
-                shape_open, shape_close = "(", ")" # Ovale.
-        elif node_type == "Return": shape_open, shape_close = "[/", "\\]" # Parallélogramme incliné.
+            else: # Jonction avec un label spécifique.
+                shape_open, shape_close = "((", "))"
+        elif node_type == "Return": shape_open, shape_close = "[(", ")]" # Parallélogramme incliné.
         elif node_type == "Jump": shape_open, shape_close = "((", "))" # Stade (comme StartEnd).
-        elif node_type == "IoOperation": shape_open, shape_close = "[/", "\\]" # Parallélogramme pour I/O.
+        elif node_type == "IoOperation": shape_open, shape_close = "[/", "/]" # Parallélogramme pour I/O.
         return shape_open, shape_close
-
-# FIN DU FICHIER EN MODE MODULE
-
-
-'''
-############### Choisir le code à tester ###############
-import exemples
-selected_code = exemples.defif
-########################################################
-
-# --- Génération et Affichage ---
-print(f"--- Code Python analysé ---")
-print(selected_code)
-
-cfg = ControlFlowGraph(selected_code)
-# Lancer la visite à partir de la racine de l'AST (le module)
-cfg.visit(cfg.tree, None) # Le parent initial est None
-print(ast.dump(cfg.tree))
-print("\n--- Mermaid Généré ---")
-print(cfg.to_mermaid())
-
-# Optionnel : Afficher les noeuds et arêtes pour le débogage
-print("\n--- Noeuds (ID, Label) ---")
-for n in cfg.nodes:
-     print(n)
-print("\n--- Arêtes (From, To, Label) ---")
-for e in sorted(list(cfg.edges)): # Trié pour la lisibilité
-     print(e)
-print("\n--- Noeuds Terminaux ---")
-print(cfg.terminal_nodes)
-'''
