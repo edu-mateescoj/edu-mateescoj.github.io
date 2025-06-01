@@ -1,54 +1,150 @@
-body {
-    font-family: Arial, sans-serif;
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 20px;
+/* Custom styles for the Python Code Exercise Authoring Tool */
+
+/* CodeMirror styling */
+.CodeMirror {
+    height: 300px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    border-radius: 0.25rem;
 }
 
-textarea {
-    width: 100%;
+/* On mobile devices, adjust the editor height */
+@media (max-width: 768px) {
+    .CodeMirror {
+        height: 220px;
+        font-size: 13px;
+    }
+}
+
+/* Mermaid flowchart container */
+.mermaid-container {
+    min-height: 300px;
+    background-color: var(--bs-dark);
+    border-radius: 0.25rem;
+    padding: 15px;
+    overflow: auto;
+}
+
+@media (max-width: 768px) {
+    .mermaid-container {
+        min-height: 220px;
+    }
+}
+
+/* Variable inputs styling */
+.variable-input {
+    font-family: 'Consolas', 'Monaco', monospace;
+}
+
+.variable-input.correct {
+    background-color: rgba(40, 167, 69, 0.15);
+    border-color: var(--bs-success);
+}
+
+.variable-input.incorrect {
+    background-color: rgba(220, 53, 69, 0.15);
+    border-color: var(--bs-danger);
+}
+
+/* Variable card styling */
+.variable-card {
+    transition: all 0.2s ease-in-out;
+    border: 1px solid var(--bs-dark);
+}
+
+.variable-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.variable-name {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+}
+
+.variable-name code {
+    background-color: rgba(0, 123, 255, 0.1);
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.2rem;
+}
+
+/* Feedback styling */
+.feedback-item {
+    padding: 10px;
+    border-radius: 0.25rem;
     margin-bottom: 10px;
 }
 
-#output {
-    border: 1px solid #ccc;
-    padding: 10px;
-    background-color: #f0f0f0;
+.feedback-correct {
+    background-color: rgba(40, 167, 69, 0.15);
+    border: 1px solid var(--bs-success);
 }
 
-/* avant j'avais utilisé: */
-
-.exercise-container {
-  margin: auto;
-  width: 50%;
-  border: 1px solid #ddd;
-  padding: 20px;
-  box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+.feedback-incorrect {
+    background-color: rgba(220, 53, 69, 0.15);
+    border: 1px solid var(--bs-danger);
 }
 
-input[type=text] {
-  width: calc(100% - 22px);
-  padding: 10px;
-  margin-top: 5px;
-  margin-bottom: 15px;
-  border: 1px solid #ddd;
+/* Card heights */
+.card {
+    height: 100%;
 }
 
-button {
-  padding: 10px 15px;
-  margin-right: 5px;
-  border: none;
-  background-color: #5cb85c;
-  color: white;
-  cursor: pointer;
+/* Adjust spacing for control panel */
+.control-group {
+    margin-bottom: 1rem;
 }
 
-button:hover {
-  opacity: 0.8;
+/* Ensure buttons have breathing room */
+.btn {
+    margin-right: 0.5rem;
 }
 
-pre {
-  background-color: #f8f8f8;
-  border: 1px solid #ddd;
-  padding: 10px;
+.btn:last-child {
+    margin-right: 0;
+}
+
+/* Make sure all cards have consistent spacing */
+.card-body {
+    padding: 1.25rem;
+}
+
+/* On mobile, adjust padding to save space */
+@media (max-width: 576px) {
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .container {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+}
+
+/* Responsive button adjustments */
+@media (max-width: 576px) {
+    .btn {
+        padding: 0.375rem 0.5rem;
+        font-size: 0.875rem;
+    }
+    
+    .d-flex {
+        flex-wrap: wrap;
+    }
+    
+    .d-flex .btn {
+        margin-bottom: 0.5rem;
+    }
+}
+
+/* Animation for loading states */
+@keyframes pulse {
+    0% { opacity: 0.6; }
+    50% { opacity: 1; }
+    100% { opacity: 0.6; }
+}
+
+.loading {
+    animation: pulse 1.5s infinite ease-in-out;
 }
