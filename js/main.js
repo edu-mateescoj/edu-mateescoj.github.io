@@ -377,35 +377,55 @@ await pyodide.runPythonAsync(syntaxValidationScript);
     .replace(/"""/g, '\\"\\"\\"'); // Ou tout autre échappement nécessaire
 
     const tracingWrapper = `
-_vars_before = list(globals().keys())
+import types    # à importer globalement pour isinstance
+import json     # déjà importé par Pyodide ? pour être sûr
 
-# --- Début du code utilisateur ---
-${escapedCodeForPythonExecution}
-# --- Fin du code utilisateur ---
-
-_vars_after = list(globals().keys())
+user_ns = {}    # Dictionnaire pour le namespace utilisateur
+try:
+    exec("""${escapedCodeForPythonExecution}""", user_ns)
+except Exception as e:
+    import traceback
+    error_detail = f"{type(e).__name__}: {str(e)}\\n{traceback.format_exc()}"
+    raise
 
 _final_vars = {}
-for _var_name in _vars_after:
-    # Vérifier si la variable a été créée par le code utilisateur
-    # + ajout de filtres pour éviter les variables internes ou non pertinentes
-    if _var_name not in _vars_before and not _var_name.startswith('_') and _var_name not in ['pyodide', 'sys', 'micropip', 'json', 'types', 'ast', 'traceback', 'error_detail', 'tracingWrapper', 'tracedVariables']:
-        _val = globals()[_var_name]
-        # Gérer les types non sérialisables simplement pour l'affichage
-        if callable(_val) or type(_val).__name__ == 'module':
-            _final_vars[_var_name] = f"<type {type(_val).__name__}>"
-        else:
-            try:
-                # Essayer de convertir en une représentation simple
-                if isinstance(_val, (str, int, float, bool, list, dict, tuple, set)):
-                     _final_vars[_var_name] = _val
-                else:
-                     _final_vars[_var_name] = repr(_val)
-            except:
-                _final_vars[_var_name] = "<valeur non représentable>"
 
+# On s'intéresse aux variables qui existent APRES l'exécution du code.
+for _var_name, _val in user_ns.items(): 
 
-import json
+    # Filtre 1: Exclure les variables purement internes au wrapper
+    if _var_name.startswith('__') and _var_name.endswith('__'):
+        continue
+
+    # Filtre 2: Exclure les modules/fonctions standards et les variables spécifiques
+    # (On peut ajuster cette liste selon les besoins, mais on veut éviter les variables internes de Pyodide)
+    if _var_name in ['pyodide', 'sys', 'micropip', 'json', 'types', 'ast', 'traceback', 'error_detail',
+                     'current_code', 'user_python_code', # Variables passées par JS au script runner
+                     'cfg_instance', 'mermaid_output', 'error_message', 'output_dict', # Variables du runner de flowchart
+                     'parsed_code_string', 'List', 'Dict', 'Set', 'Tuple', 'Optional'
+                     ]:
+        continue
+
+    # Filtre 3: Exclure les modules et fonctions/types (sauf si vous voulez les lister)
+    # La vérification isinstance est plus robuste que type(_val).__name__
+    if isinstance(_val, (types.ModuleType, types.FunctionType, type, types.BuiltinFunctionType, types.BuiltinMethodType)):
+        # On pourrait choisir de les lister comme "<type module>" etc. ou simplement les ignorer.
+        # Pour le défi élève, on veut généralement les valeurs des variables de données.
+        continue
+    
+    # À ce stade, _var_name est probablement une variable définie par l'utilisateur.
+    # Elle peut avoir été créée par le code utilisateur, ou existait avant et a été modifiée,
+    # ou existait avant et n'a pas été modifiée mais passe les filtres.
+
+    # Logique de sérialisation (votre code existant est bon ici)
+    if isinstance(_val, (str, int, float, bool, list, dict, tuple, set)) or _val is None:
+        _final_vars[_var_name] = _val
+    else:
+        try:
+            _final_vars[_var_name] = repr(_val) 
+        except:
+            _final_vars[_var_name] = "<valeur non sérialisable>"
+
 json.dumps(_final_vars)
 `;
         // Attention: la sérialisation JSON directe de tous les types Python peut échouer.
