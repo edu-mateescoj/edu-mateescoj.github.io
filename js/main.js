@@ -343,6 +343,8 @@ z = x + y`;
  */
 async function runAndTraceCodeForChallenge(code, pyodide) {
     console.log("Exécution du code pour le défi...");
+    //But: préparer et valider le code Python saisi par l’utilisateur, en l’échappant correctement 
+    // et en vérifiant sa syntaxe dans Pyodide avant toute exécution ou traçage des variables.
     let tracedVariables = {};
     const escapedCodeForPythonTripleQuotes = code
     .replace(/\\/g, '\\\\') // 1. Échapper les \ en \\
@@ -353,6 +355,9 @@ async function runAndTraceCodeForChallenge(code, pyodide) {
 error_detail = ""
 parsed_code_string = """${escapedCodeForPythonTripleQuotes}""" # Injection ici
 try:
+    print(f"--- Contenu de parsed_code_string pour ast.parse ---") # LOG PYTHON REDIRIGÉ PAR PYODIDE DANS LA CONSOLE
+    print(parsed_code_string)                                    # LOG PYTHON
+    print(f"--- Fin du contenu ---")                              # LOG PYTHON
     ast.parse(parsed_code_string)
 except Exception as e:
     import traceback
@@ -363,7 +368,7 @@ except Exception as e:
     
 "Syntax OK"    
 `;
-// console.log("Script de validation syntaxique pour le défi:", syntaxValidationScript);
+console.log("Script de validation syntaxique pour le défi:", syntaxValidationScript); // LOG JS
 await pyodide.runPythonAsync(syntaxValidationScript);
 } catch (syntaxValidationError) {
     console.error("Erreur de syntaxe DANS LE CODE UTILISATEUR avant exécution du défi:", syntaxValidationError);
@@ -371,10 +376,10 @@ await pyodide.runPythonAsync(syntaxValidationScript);
     // et ne pas procéder à l'exécution de tracingWrapper.
     throw syntaxValidationError; // Ou retourner un indicateur d'erreur
 }
-        // Code pour tracer les variables
+        // Code pour tracer les variables: maintenant redondance avec escapedCodeForPythonTripleQuotes
         const escapedCodeForPythonExecution = code
     .replace(/\\/g, '\\\\')
-    .replace(/"""/g, '\\"\\"\\"'); // Ou tout autre échappement nécessaire
+    .replace(/"""/g, '\\"\\"\\"'); // Ou tout autre échappement nécessaire... à voir
 
     const tracingWrapper = `
 import types    # à importer globalement pour isinstance
@@ -432,7 +437,7 @@ json.dumps(_final_vars)
         // repr() est plus sûr pour l'affichage mais plus difficile à parser en retour.
         // La version avec `_final_vars[_var_name] = _val` et `json.dumps` est plus robuste si les types sont simples.
 
-console.log("Code complet passé à Pyodide pour le défi:", tracingWrapper);
+console.log("tracingWrapper passé à Pyodide pour le défi:", tracingWrapper);
 try {
     // Validation syntaxique :
     // console.log("Code pour validation syntaxe défi:", `import ast; ast.parse("""${code.replace(/"/g, '\\"').replace(/\\/g, '\\\\')}""")`);
