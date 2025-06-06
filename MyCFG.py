@@ -502,10 +502,10 @@ class ControlFlowGraph:
 
         # Deux types de nœuds pour la suite de la structure
         # test: on itère ? 
-        retest_decision_label = f"Encore un {elements_type_desc} à traiter<br>dans la {iterable_type_desc} '{iterable_display_name}' ?"
+        retest_decision_label = f"Encore un {elements_type_desc} à traiter<br>dans la {iterable_type_desc} {iterable_display_name} ?"
         retest_decision_id = self.add_node(retest_decision_label, node_type="Decision")
         # au cas où on itère:
-        next_var_label = f"{iterator_variable_str} ← {elements_type_desc} suivant<br>de la {iterable_type_desc} '{iterable_display_name}'"
+        next_var_label = f"{iterator_variable_str} ← {elements_type_desc} suivant<br>de la {iterable_type_desc} {iterable_display_name}"
         next_var_id = self.add_node(next_var_label, node_type="Process")
 
         # --- Connexions ---
