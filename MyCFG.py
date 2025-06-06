@@ -1121,13 +1121,13 @@ class ControlFlowGraph:
         
         # Définitions de style pour les types de nœuds.
         mermaid_lines.extend([
-            "    classDef StartEnd fill:#555,stroke:#fff,stroke-width:2px;",
-            "    classDef Decision fill:#555,stroke:#fff,stroke-width:2px;",
-            "    classDef Process fill:#555,stroke:#fff,stroke-width:2px;",
-            "    classDef IoOperation fill:#555,stroke:#fff,stroke-width:2px;",
-            "    classDef Junction fill:#555,stroke:#fff,stroke-width:1px;", # Cercle pour jonction.
-            "    classDef Return fill:#555,stroke:#fff,stroke-width:2px;",
-            "    classDef Jump fill:#555,stroke:#fff,stroke-width:2px;"
+            "    classDef StartEnd fill:#999,stroke:#fff,stroke-width:2px;",
+            "    classDef Decision fill:#999,stroke:#fff,stroke-width:2px;",
+            "    classDef Process fill:#999,stroke:#fff,stroke-width:2px;",
+            "    classDef IoOperation fill:#999,stroke:#fff,stroke-width:2px;",
+            "    classDef Junction fill:#999,stroke:#fff,stroke-width:1px;", # Cercle pour jonction.
+            "    classDef Return fill:#999,stroke:#fff,stroke-width:2px;",
+            "    classDef Jump fill:#999,stroke:#fff,stroke-width:2px;"
         ])
 
         # --- Sous-graphe pour le Flux Principal ---
