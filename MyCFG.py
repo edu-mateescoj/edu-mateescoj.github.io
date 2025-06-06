@@ -361,7 +361,7 @@ class ControlFlowGraph:
         if not skip_first_check:
             # 1. Première Décision: Y a-t-il des éléments à traiter ?
             # Utiliser une formulation neutre pour le type d'itérable.
-            entry_decision_label = f"{iterable_kind_desc.capitalize()} {iterable_display_name}\
+            entry_decision_label = f"{iterable_kind_desc.capitalize()} '{iterable_display_name}'\
                 <br>contient des {elements_type_desc_raw}s ?" # Garder un pluriel simple avec 's'
             entry_decision_id = self.add_node(entry_decision_label, node_type="Decision")
             self.add_edge(parent_id, entry_decision_id)
@@ -370,11 +370,11 @@ class ControlFlowGraph:
         # 2. Initialisation de la variable locale au premier élément
         # Utiliser les articles pour les labels d'initialisation et de mise à jour
         if article_indefini_element == "un":
-            init_var_label = f"{iterator_variable_str} ← Le premier {elements_type_desc_raw}<br>de {iterable_display_name}"
+            init_var_label = f"{iterator_variable_str} ← Le premier {elements_type_desc_raw}<br>de '{iterable_display_name}'"
         elif article_indefini_element == "une":
-            init_var_label = f"{iterator_variable_str} ← La première {elements_type_desc_raw}<br>de {iterable_display_name}"
+            init_var_label = f"{iterator_variable_str} ← La première {elements_type_desc_raw}<br>de '{iterable_display_name}'"
         else: # "des" ou autre
-            init_var_label = f"{iterator_variable_str} ← Les premier(es) {elements_type_desc_raw}<br>de {iterable_display_name}"
+            init_var_label = f"{iterator_variable_str} ← Les premier(es) {elements_type_desc_raw}<br>de '{iterable_display_name}'"
         init_var_id = self.add_node(init_var_label, node_type="Process")
 
         if entry_decision_id: # Si la première décision existe (on ne l'a pas sautée)
@@ -383,15 +383,15 @@ class ControlFlowGraph:
             self.add_edge(parent_id, init_var_id)
 
         # Nœuds pour le re-test et la mise à jour de l'itérateur
-        retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans {iterable_display_name} ?"
+        retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans '{iterable_display_name}' ?"
         retest_decision_id = self.add_node(retest_decision_label, node_type="Decision")
         
         if article_indefini_element == "un":
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivant<br>de {iterable_display_name}"
+            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivant<br>de '{iterable_display_name}'"
         elif article_indefini_element == "une":
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivante<br>de {iterable_display_name}"
+            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivante<br>de '{iterable_display_name}'"
         else: # "des" ou autre
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw}s suivants<br>de {iterable_display_name}"
+            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw}s suivants<br>de '{iterable_display_name}'"
         next_var_id = self.add_node(next_var_label, node_type="Process")
 
         # --- Connexions et Flux ---
