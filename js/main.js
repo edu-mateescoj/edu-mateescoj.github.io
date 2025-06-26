@@ -22,14 +22,178 @@ const BUILTINS_ADVANCED = [
     { id: 'builtin-sum', label: 'sum()' }
 ];
 
-var codeEditorInstance;
 
+
+// --- Gestion des boutons de l’éditeur de code: mode édition, régénération, ...  ---
+let lastLoadedCode = ""; // Pour restaurer l'état après génération/chargement
+let isEditorEditable = false;
+// variable d'état globale : permet à tout le JS de savoir si l'éditeur est éditable ou non
+
+// ATTENTION... AUSSI listener pour le bouton (toggleBtn: référence à l'élément bouton)
+
+function setEditorEditable(editable) {
+    isEditorEditable = editable;
+    if (codeEditorInstance) {
+        codeEditorInstance.setOption('readOnly', !editable);
+    }
+    const btn = document.getElementById('toggle-editable-btn');
+    if (btn) {
+        btn.innerHTML = editable
+            ? '<i class="far fa-edit"></i> Rendre non éditable'
+            : '<i class="fas fa-edit"></i> Rendre éditable';
+    }
+}
+
+var codeEditorInstance;
 document.addEventListener('DOMContentLoaded', function() {
+
     codeEditorInstance = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
-        mode: 'python', theme: 'dracula', lineNumbers: true, indentUnit: 4,
-        tabSize: 4, indentWithTabs: false, lineWrapping: true, readOnly: false
+        mode: 'python', 
+        theme: 'dracula', 
+        lineNumbers: true, 
+        firstLineNumber: 0,
+        indentUnit: 4,
+        tabSize: 4, 
+        indentWithTabs: false, 
+        lineWrapping: true, 
+        readOnly: !isEditorEditable // Initialement non éditable
+
     });
-    let variableValuesFromExecution = {};
+    
+    // 1er bouton: Toggle éditable
+    const toggleBtn = document.getElementById('toggle-editable-btn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => setEditorEditable(!isEditorEditable));
+    }
+
+    // 2ème: Télécharger le code
+    const downloadBtn = document.getElementById('download-code-btn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', () => {
+            if (!codeEditorInstance) return;
+            const code = codeEditorInstance.getValue();
+            const blob = new Blob([code], {type: "text/x-python"}); //
+            const url = URL.createObjectURL(blob); // Crée un objet URL pour le blob
+            const a = document.createElement('a'); // Crée un lien temporaire pour le téléchargement
+            a.href = url; 
+            const now = new Date();
+            const yyyy = now.getFullYear().toString(); // Année complète
+            const yy = yyyy[2] + yyyy[3]; // 2 derniers chiffres de l'année
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            a.download = `mon_code_${dd}${mm}${yy}.py`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 0);
+        });
+    }
+
+    // 3ème bouton: Ouvrir un fichier .PY ONLY
+    const openFileBtn = document.getElementById('open-file-btn');
+    const fileInput = document.getElementById('file-input');
+    if (openFileBtn && fileInput) {
+        openFileBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file && file.name.endsWith('.py')) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    if (codeEditorInstance) {
+                        // Invalider l'état du diagramme actuel car un nouveau fichier est chargé
+                        lastDiagramAstDump = "";
+                        document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Nouveau fichier chargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
+                        resetChallengeInputs();
+                        document.getElementById('check-answers-btn').disabled = true;
+                        document.getElementById('show-solution-btn').disabled = true;
+                        
+                        codeEditorInstance.setValue(evt.target.result);
+                        lastLoadedCode = evt.target.result; // Mémorise ce code comme "dernier chargé"
+                        setDiagramAndChallengeCardState("default"); // Le nouvel état est "default", pas "outdated"
+                    }
+                };
+                reader.readAsText(file, "UTF-8");
+            } else {
+                alert("Choisissez un fichier .py UNIQUEMENT");
+            }
+            fileInput.value = ""; // Reset pour permettre de recharger le même fichier
+        });
+    }
+
+    // 4ème: Partager (ici: copier dans le presse-papier)
+    const shareBtn = document.getElementById('share-code-btn');
+    if (shareBtn) {
+        shareBtn.addEventListener('click', async () => {
+            if (!codeEditorInstance) return;
+            const code = codeEditorInstance.getValue();
+            try {
+                await navigator.clipboard.writeText(code);
+                shareBtn.classList.add('btn-success');
+                setTimeout(() => shareBtn.classList.remove('btn-success'), 1000);
+            } catch (err) {
+                alert("Impossible de copier dans le presse-papier.");
+            }
+        });
+    }
+
+    // 5ème: Reload (restaurer le code après génération/chargement)
+    const reloadBtn = document.getElementById("reload-code-btn");
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', () => {
+            if (lastLoadedCode && codeEditorInstance) {
+                // 1. Invalider l'état du diagramme et du défi AVANT de changer le code.
+                //    Ceci est crucial pour que le listener 'change' ne voie pas un état incohérent.
+                lastDiagramAstDump = ""; // Le diagramme ne correspondra plus, il est donc invalidé.
+                document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Code rechargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
+                resetChallengeInputs();
+                document.getElementById('check-answers-btn').disabled = true;
+                document.getElementById('show-solution-btn').disabled = true;
+
+                // 2. Changer la valeur de l'éditeur.
+                //    Le listener 'change' va se déclencher ici.
+                codeEditorInstance.setValue(lastLoadedCode);
+                
+                // 3. Le listener 'change' verra que lastDiagramAstDump est vide et mettra l'état à "default".
+                //    L'appel explicite ici est une sécurité supplémentaire.
+                setDiagramAndChallengeCardState("default");
+                console.log("Code rechargé depuis la dernière sauvegarde. Diagramme invalidé.");
+            }
+        });
+    }
+
+    // --- Mémoriser le code après génération ou chargement d'exemple ---
+    function memorizeLoadedCode(code) {
+        lastLoadedCode = code;
+    }
+
+    // Appelle memorizeLoadedCode(code) après chaque génération ou chargement d'exemple
+    // dans le gestionnaire du bouton "Générer un Code Aléatoire" :
+    const generateCodeButton = document.getElementById('generate-code-btn');
+    if (generateCodeButton) {
+        generateCodeButton.addEventListener('click', function() {
+            // La mémorisation se fait après la génération, dans le listener du bouton.
+            // On invalide aussi l'état du diagramme ici.
+            lastDiagramAstDump = "";
+            console.log("génération du code par ailleurs... on va mémoriser et invalider le diagramme");
+            if (codeEditorInstance) memorizeLoadedCode(codeEditorInstance.getValue());
+        });
+    }
+    // dans le gestionnaire de chargement d'exemple :
+    const predefinedExamplesList = document.getElementById('predefined-examples-list');
+    if (predefinedExamplesList) {
+        predefinedExamplesList.querySelectorAll('a[data-example-index]').forEach(link => {
+            link.addEventListener('click', function() {
+                // L'invalidation et la mémorisation sont gérées dans le listener de chaque lien d'exemple.
+                lastDiagramAstDump = "";
+                console.log("chargement du code par ailleurs... on va mémoriser et invalider le diagramme");
+                if (codeEditorInstance) memorizeLoadedCode(codeEditorInstance.getValue());
+            });
+        });
+    }
+    
+    let variableValuesFromExecution = {}; // Pour stocker les valeurs des variables après l'exécution du code
 
     // --- Éléments DOM Globaux pour la Configuration ---
     const difficultyGlobalSelect = document.getElementById('difficulty-level-global');
@@ -61,8 +225,7 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>`;
 
     // --- Gestion du chargement des exemples prédéfinis ---
-    const predefinedExamplesList = document.getElementById('predefined-examples-list');
-    const loadPredefinedCodeBtn = document.getElementById('load-predefined-code-btn'); // Le bouton lui-même
+     const loadPredefinedCodeBtn = document.getElementById('load-predefined-code-btn'); // Le bouton lui-même
 
     if (predefinedExamplesList && typeof PREDEFINED_EXAMPLES !== 'undefined' && PREDEFINED_EXAMPLES.length > 0) {
         PREDEFINED_EXAMPLES.forEach((example, index) => {
@@ -78,10 +241,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 const exampleIndex = parseInt(this.dataset.exampleIndex);
                 const selectedExample = PREDEFINED_EXAMPLES[exampleIndex];
                 if (selectedExample && codeEditorInstance) {
+                    // Invalider l'état du diagramme actuel car un nouvel exemple est chargé
+                    lastDiagramAstDump = "";
+                    
                     codeEditorInstance.setValue(selectedExample.code);
-                    console.log(`Exemple chargé : ${selectedExample.name}`);
-                    // Optionnel: déclencher une mise à jour du diagramme ou réinitialiser le défi
-                    // triggerFlowchartUpdate(); // Si vous voulez que le diagramme se mette à jour
+                    memorizeLoadedCode(selectedExample.code);
+                    
+                    setDiagramAndChallengeCardState("default");
+                    console.log(`Exemple chargé et mémorisé: ${selectedExample.name}. Diagramme invalidé.`);
+                    
                     resetChallengeInputs();
                     document.getElementById('check-answers-btn').disabled = true;
                     document.getElementById('show-solution-btn').disabled = true;
@@ -689,7 +857,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
     // --- Gestionnaire pour "Générer un Code Aléatoire" ---
-    const generateCodeButton = document.getElementById('generate-code-btn');
+    // déjé déclaré: const generateCodeButton = document.getElementById('generate-code-btn');
     if (generateCodeButton) {
         generateCodeButton.addEventListener('click', function() {
             //console.log("Bouton 'Générer un Code Aléatoire' cliqué.");
@@ -776,9 +944,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.warn("generateRandomPythonCode n'est pas définie.");
                 newGeneratedCode = "# Erreur: Le générateur de code aléatoire n'est pas disponible.";
             }
+            
+            // Invalider l'état du diagramme actuel car un nouveau code est généré
+            lastDiagramAstDump = "";
+            
             if(codeEditorInstance) codeEditorInstance.setValue(newGeneratedCode);
+            memorizeLoadedCode(newGeneratedCode);
+            setDiagramAndChallengeCardState("default");
+            
             var flowchartDisplayArea = document.getElementById('flowchart');
             if (flowchartDisplayArea) flowchartDisplayArea.innerHTML = '<p class="text-center text-muted mt-3">Nouveau code généré. Cliquez sur "Lancer..."</p>';
+            
             resetChallengeInputs();
             const checkBtn = document.getElementById('check-answers-btn');
             const showSolBtn = document.getElementById('show-solution-btn');
@@ -789,6 +965,106 @@ document.addEventListener('DOMContentLoaded', function() {
         console.warn("Bouton 'generate-code-btn' non trouvé.");
     }
 
+// --- Gestion de la synchronisation diagramme/code ---
+
+// Variable globale pour stocker le dump AST du dernier diagramme généré
+let lastDiagramAstDump = "";
+
+// Fonction utilitaire pour obtenir le dump AST du code courant via Pyodide
+async function getAstDumpFromCode(code) {
+    if (!pyodide) {
+        console.warn("Pyodide n'est pas prêt.");
+        return null;
+    }
+    try {
+        // On utilise la classe ControlFlowGraph déjà chargée dans Pyodide
+        pyodide.globals.set("user_python_code", code);
+        const pyScript = `
+import ast
+try:
+    cfg_instance = ControlFlowGraph(user_python_code)
+    result = ast.dump(cfg_instance.tree)
+except Exception:
+    result = None # Retourne None si le code est syntaxiquement invalide
+result
+`;
+        const astDump = await pyodide.runPythonAsync(pyScript);
+        return astDump;
+    } catch (e) {
+        console.error("Erreur lors de la récupération du dump AST:", e);
+        return null;
+    }
+}
+
+/**
+ * Met à jour l'état visuel des cartes du diagramme et du défi.
+ * @param {string} state - "outdated" (rouge), "default" (bleu/info).
+ */
+function setDiagramAndChallengeCardState(state) {
+    const diagramCard = document.getElementById('flowchart')?.closest('.card');
+    const challengeCard = document.getElementById('variables-container')?.closest('.card');
+    
+    [diagramCard, challengeCard].forEach(card => {
+        if (!card) return;
+        // Nettoyer toutes les classes de bordure potentielles
+        card.classList.remove('border-danger', 'border-info', 'border-secondary');
+        card.classList.remove('border'); // Retirer la classe 'border' de base aussi
+
+        if (state === "outdated") {
+            card.classList.add('border', 'border-danger');
+            card.style.opacity = '0.3'; // Légèrement transparent pour indiquer l'état périmé
+        } else {
+            // Appliquer la bordure par défaut (bleu info)
+            card.classList.add('border', 'border-info');
+            card.style.opacity = "1"; // Restaure l'opacité normale
+        }
+    });
+
+    // Mettre à jour le bouton "Lancer"
+    const runBtn = document.getElementById('run-code-btn');
+    if (runBtn) {
+        runBtn.classList.remove('btn-danger', 'btn-success');
+        if (state === "outdated") {
+            runBtn.classList.add('btn-danger');
+        } else {
+            runBtn.classList.add('btn-success');
+        }
+    }
+}
+
+
+// Listener sur l’éditeur CodeMirror pour détecter les changements
+if (codeEditorInstance) {
+    codeEditorInstance.on('change', async function() {
+        // Si Pyodide n'est pas prêt, on ne fait rien.
+        if (!pyodide) return;
+        
+        // Si lastDiagramAstDump est vide ou null, cela signifie qu'aucun diagramme
+        // n'est actuellement affiché ou qu'il a été invalidé (ex: par un reload).
+        // Dans ce cas, le code ne peut pas être "périmé". L'état est "default".
+        if (!lastDiagramAstDump) {
+            setDiagramAndChallengeCardState("default");
+            return;
+        }
+
+        const currentCode = codeEditorInstance.getValue();
+        const currentAstDump = await getAstDumpFromCode(currentCode);
+
+        // Si le code actuel est syntaxiquement invalide, currentAstDump sera null.
+        // On considère cela comme "périmé" car il ne peut pas correspondre au diagramme.
+        if (!currentAstDump) {
+            setDiagramAndChallengeCardState("outdated");
+            return;
+        }
+        
+        // Comparer le dump AST du code courant à celui du dernier diagramme généré.
+        if (currentAstDump !== lastDiagramAstDump) {
+            setDiagramAndChallengeCardState("outdated");
+        } else {
+            setDiagramAndChallengeCardState("default");
+        }
+    });
+}
     // Gestionnaire pour le bouton "Lancer le diagramme et les défis" (#run-code-btn).
     const runCodeButton = document.getElementById('run-code-btn');
     if (runCodeButton) {
@@ -803,35 +1079,72 @@ document.addEventListener('DOMContentLoaded', function() {
             const currentCode = codeEditorInstance.getValue();
 
             // 1. Mettre à jour le diagramme de flux.
-            if (typeof triggerFlowchartUpdate === 'function') {
-                await triggerFlowchartUpdate(); 
-            } else {
-                console.error("La fonction triggerFlowchartUpdate n'est pas définie.");
-                alert("Erreur : La fonctionnalité de génération de diagramme n'est pas prête.");
+            try {
+                if (typeof triggerFlowchartUpdate === 'function') {
+                    await triggerFlowchartUpdate(); 
+                } else {
+                    throw new Error("La fonction triggerFlowchartUpdate n'est pas définie.");
+                }
+            } catch (e) {
+                console.error("Erreur lors de la mise à jour du diagramme de flux:", e);
+                alert("Erreur : Impossible de mettre à jour le diagramme de flux. Veuillez vérifier la console pour plus de détails.");
+                return; // Ne pas continuer si le diagramme n'a pas pu être mis à jour
             }
-
-            // 2. Exécuter le code Python pour obtenir les valeurs des variables pour le défi.
+            
+            // 2. Mettre à jour le dump AST de référence. C'est le point crucial.
+            //    C'est maintenant la nouvelle "source de vérité" pour le diagramme affiché.
+            try {
+                if (pyodide) {
+                    const astDump = await getAstDumpFromCode(currentCode);
+                    if (astDump) {
+                        lastDiagramAstDump = astDump;
+                        console.log("lastDiagramAstDump mis à jour avec succès.");
+                    } else {
+                        // Le code est syntaxiquement invalide, le diagramme a affiché une erreur.
+                        // On invalide le dump pour que toute modification future ne soit pas comparée à un état inexistant.
+                        lastDiagramAstDump = "";
+                    }
+                }
+            } catch (e) {
+                console.warn("Impossible de mettre à jour le dump AST de référence:", e);
+                lastDiagramAstDump = ""; // Invalider en cas d'erreur
+            }
+            
+            // 3. Après la mise à jour réussie, l'état est "default".
+            setDiagramAndChallengeCardState("default");
+            
+            // 4. Exécuter le code Python pour obtenir les valeurs des variables pour le défi.
             try {
                 variableValuesFromExecution = {}; 
                 resetChallengeInputs();
                 
-                if (typeof pyodide !== 'undefined' && pyodide) { // pyodide est global depuis flowchart-generator.js
+                if (typeof pyodide !== 'undefined' && pyodide) {
                      variableValuesFromExecution = await runAndTraceCodeForChallenge(currentCode, pyodide);
                 } else {
                     console.warn("Pyodide n'est pas encore prêt pour exécuter le code du défi.");
                     alert("Le moteur Python n'est pas encore prêt. Veuillez patienter.");
-                    // S'assurer que les boutons de défi restent désactivés si Pyodide n'est pas prêt
                     const checkAnswersButton = document.getElementById('check-answers-btn');
                     const showSolutionButton = document.getElementById('show-solution-btn');
                     if (checkAnswersButton) checkAnswersButton.disabled = true;
                     if (showSolutionButton) showSolutionButton.disabled = true;
-                    return; // Ne pas continuer si Pyodide n'est pas prêt
+                    return;
                 }
 
-                // 3. Mettre à jour l'interface du défi avec les variables trouvées.
-                populateChallengeInputs(variableValuesFromExecution); 
+                // 5. Mettre à jour l'interface du défi avec les variables trouvées.
+                if (Object.keys(variableValuesFromExecution).length > 0) {
+                    populateChallengeInputs(variableValuesFromExecution);
+                } else {
+                    const container = document.getElementById('variables-container');
+                    if (container) {
+                        container.innerHTML = `
+                            <div class="col-12 text-center text-warning">
+                                <p>Aucune variable à suivre n'a été trouvée après l'exécution du code.<br>
+                                Vérifiez que votre code contient bien des affectations de variables accessibles.</p>
+                            </div>`;
+                    }
+                }
                 
-                // 4. Activer les boutons du défi si des variables ont été trouvées.
+                // 6. Activer les boutons du défi si des variables ont été trouvées.
                 const hasVariables = Object.keys(variableValuesFromExecution).length > 0;
                 const checkAnswersButton = document.getElementById('check-answers-btn');
                 const showSolutionButton = document.getElementById('show-solution-btn');
@@ -840,8 +1153,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
             } catch (error) {
                 console.error("Erreur lors de l'exécution du code pour le défi:", error);
-                // Afficher une modale d'erreur ou un message à l'utilisateur.
-                // S'assurer que les boutons de défi sont désactivés en cas d'erreur.
+                const container = document.getElementById('variables-container');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="col-12 text-center text-danger">
+                            <p>Erreur lors de l'exécution du code Python pour le défi :<br>
+                            <code>${error.message}</code></p>
+                        </div>`;
+                }
                 const checkAnswersButton = document.getElementById('check-answers-btn');
                 const showSolutionButton = document.getElementById('show-solution-btn');
                 if (checkAnswersButton) checkAnswersButton.disabled = true;
@@ -879,6 +1198,24 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
+    // Gestionnaire pour le bouton "Effacer la console"
+    const clearConsoleBtn = document.getElementById('clear-console-btn');
+    if (clearConsoleBtn) {
+        clearConsoleBtn.addEventListener('click', clearConsole);
+    }
+    
+    // Gestionnaire pour le bouton "Effacer le dessin Turtle"
+    const clearTurtleBtn = document.getElementById('clear-turtle-canvas-btn');
+    if (clearTurtleBtn) {
+        clearTurtleBtn.addEventListener('click', () => {
+            const canvas = document.getElementById('turtle-canvas');
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+    }
+
     // --- Fonctions utilitaires pour la section Défi ---
 
     /**
@@ -1023,6 +1360,7 @@ else:
 z = x + y`;
     if (codeEditorInstance) {
         codeEditorInstance.setValue(defaultPythonCode);
+        memorizeLoadedCode(defaultPythonCode);
     }
 
     var flowchartDisplayArea = document.getElementById('flowchart');
@@ -1035,6 +1373,9 @@ z = x + y`;
     const showSolBtn = document.getElementById('show-solution-btn');
     if (checkBtn) checkBtn.disabled = true;
     if (showSolBtn) showSolBtn.disabled = true;
+    
+    // État initial des cartes
+    setDiagramAndChallengeCardState("default");
 
 }); // Fin de DOMContentLoaded
 
@@ -1042,97 +1383,192 @@ z = x + y`;
 // --- Fonctions pour le Défi (déplacées de l'intérieur de DOMContentLoaded pour être globales si nécessaire, mais restent dans ce scope) ---
 
 async function runAndTraceCodeForChallenge(code, pyodideInstance) { // pyodideInstance au lieu de pyodide global
-    console.log("Exécution du code pour le défi...");
-    let tracedVariables = {};
+    console.log("Exécution du code pour le défi maintenant avec I/O personnalisés...");
+    clearConsole();
 
-    const escapedCodeForPythonTripleQuotes = code
-        .replace(/\\/g, '\\\\') 
-        .replace(/"""/g, '\\"\\"\\"'); 
+    // --- Gestion de Turtle (Méthode Basthon) ---
+    const turtleCard = document.getElementById('turtle-graphics-card');
+    const turtleCanvas = document.getElementById('turtle-canvas');
+    let turtleSetupCode = "";
 
-    // Validation syntaxique préliminaire dans Pyodide
-    const syntaxValidationScript = `
-import ast
-import traceback
-
-error_detail = ""
-parsed_code_string = """${escapedCodeForPythonTripleQuotes}"""
-
-try:
-    ast.parse(parsed_code_string)
-    _syntax_check_result = "Syntax OK"
-except Exception as e:
-    _syntax_check_result = f"Syntax Error: {type(e).__name__}: {str(e)}\\n{traceback.format_exc()}"
-
-_syntax_check_result # Retourne le résultat
-`;
-    try {
-        console.log("Script de validation syntaxique pour le défi (avant exécution Pyodide):", syntaxValidationScript);
-        let syntaxCheckResult = await pyodideInstance.runPythonAsync(syntaxValidationScript);
-        console.log("Résultat de la validation syntaxique (Pyodide):", syntaxCheckResult);
-        if (syntaxCheckResult !== "Syntax OK") {
-            console.error("Erreur de syntaxe détectée par Pyodide avant l'exécution tracée:", syntaxCheckResult);
-            alert(`Erreur de syntaxe dans votre code Python:\n${syntaxCheckResult}`);
-            return {}; // Retourne un objet vide car l'exécution ne peut pas continuer
+    // 1. Détection et chargement à la demande
+    // On suppose que turtle est installé. On ne fait que la configuration.
+    if (code.includes("import turtle")) {
+        try {
+            await pyodideInstance.loadPackage('turtle'); // ou bien "turtle" ??
+            if (turtleCard && turtleCanvas) {
+                turtleCard.style.display = 'block';
+                // Le nettoyage du canvas se fait ICI UNIQUEMENT au début, et pas à la fin.
+                // la solution au problème de la fenêtre blanche ??
+                const ctx = turtleCanvas.getContext('2d');
+                ctx.clearRect(0, 0, turtleCanvas.width, turtleCanvas.height);
+                // Le module turtle est déjà installé. On lui dit juste où dessiner.
+                turtleSetupCode = `
+import sys
+import pyo_js_turtle as turtle
+sys.modules['turtle'] = turtle
+turtle.Screen().setup(target_id='turtle-canvas')
+`; //turtle.setup_canvas('turtle-canvas') 
         }
-    } catch (e) { // Erreur inattendue durant la validation elle-même (rare)
-        console.error("Erreur inattendue durant la validation syntaxique avec Pyodide:", e);
-        alert(`Une erreur inattendue est survenue lors de la vérification de la syntaxe de votre code:\n${e.message}`);
-        return {};
+    } catch (e) {
+        console.error("Erreur lors du chargement du paquet Turtle:", e);
+        logToConsole(formatPythonError(e.message), 'error');
+        return {}; // On arrête l'exécution si Turtle échoue
     }
-    
-    // Le code de traçage est injecté après la validation
-    // Assurez-vous que `escapedCodeForPythonTripleQuotes` est utilisé ici aussi pour la cohérence
-    const tracingWrapper = `
-import types
-import json
+} else if (turtleCard) {
+        turtleCard.style.display = 'none'; // Masquer si turtle n'est pas utilisé
+    }
 
-user_ns = {} 
+    // 1. Rendre nos fonctions JS accessibles à Pyodide
+    pyodideInstance.globals.set("js_print_handler", logToConsole);
+    pyodideInstance.globals.set("js_input_handler", handlePythonInput);
+
+    // On passe le code à Pyodide via des variables globales, pas par injection de chaîne.
+    // beaucoup plus robuste ??
+    pyodideInstance.globals.set("turtle_setup_script", turtleSetupCode);
+    pyodideInstance.globals.set("student_code_to_run", code); // On passe le code brut ici
+    // On utilise une variable globale pour le code de l'élève:
+    /* PLUS BESOIN D'ECHAPPER LES GUILLEMETS TRIPLES
+    * // On échappe les guillemets triples pour éviter les conflits dans le code Python
+    * // On échappe les backslashes pour éviter les erreurs de syntaxe
+    * const escapedCodeForPythonTripleQuotes = code
+    *    .replace(/\\/g, '\\\\') 
+    *    .replace(/"""/g, '\\"\\"\\"'); 
+    */
+
+    // On passe l'objet pyodide lui-même au script Python pour qu'il puisse l'utiliser ??
+    // pyodideInstance.globals.set("pyodide", pyodideInstance);
+
+    // Définition des fonctions "custom" puis filtrage des variables
+    // 2. Le wrapper Python qui redéfinit les builtins et exécute le code
+    const tracingWrapper = `
+import builtins
+import io
+import sys
+import json
+import types
+import asyncio
+import pyodide ###############################################
+from pyodide.ffi import to_js
+import ast
+
+class AwaitInputTransformer(ast.NodeTransformer):
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name) and node.func.id == "input":
+            return ast.Await(value=node)
+        return self.generic_visit(node)
+
+
+# --- Stockage des originaux et initialisation ---
+_original_print = builtins.print
+_original_input = builtins.input
+user_ns = {}
 _final_vars = {}
 _error_detail_trace = None
 
-try:
-    exec("""${escapedCodeForPythonTripleQuotes}""", user_ns) # Utilise la même version échappée
-except Exception as e:
-    import traceback
-    _error_detail_trace = f"{type(e).__name__}: {str(e)}\\n{traceback.format_exc()}"
+# --- Redéfinition de print() ---
+def custom_print(*args, **kwargs):
+    # On utilise un buffer pour capturer la sortie formatée par print
+    s_io = io.StringIO()
+    # On force la sortie à aller dans notre buffer au lieu de la console
+    kwargs['file'] = s_io
+    _original_print(*args, **kwargs)
+    message = s_io.getvalue()
+    # On appelle le handler JS avec la chaîne capturée
+    js_print_handler(message)
+
+# --- Redéfinition de input() ---
+# C'est une fonction asynchrone car elle doit attendre le JS
+async def custom_input(prompt=""):
+    # On appelle le handler JS, qui retourne une Promise.
+    # L'await ici met en pause l'exécution Python jusqu'à ce que la Promise soit résolue.
+    response = await js_input_handler(prompt)
+    # On affiche aussi l'invite et la réponse dans la console pour la traçabilité
+    js_print_handler(str(prompt) + str(response) + '\\n', 'output')
+    return response
+
+# --- Surcharge des builtins ---
+builtins.print = custom_print
+builtins.input = custom_input
+
+# --- Exécution et traçage ---
+async def main():
+    # Cette fonction 'main' asynchrone va contenir l'exécution du code
+    global _error_detail_trace, user_ns # Rendre les variables accessibles
+
+    try:
+        from ast import unparse
+        
+        # On utilise pyodide.code.eval_code_async qui est conscient de l'asynchronisme.
+        # Il va gérer les 'await' implicites sur les fonctions comme notre custom_input.
+        
+        # On exécute d'abord le code de configuration de Turtle (qui est synchrone)
+        exec(turtle_setup_script, user_ns)
+        
+        tree = ast.parse(student_code_to_run)
+        transformed_tree = AwaitInputTransformer().visit(tree)
+        ast.fix_missing_locations(transformed_tree)
+        transformed_code_string = unparse(transformed_tree)
+
+        # CORRECTION POUR PROBLÈME COROUTINE !!
+        await pyodide.code.eval_code_async(transformed_code_string, globals=user_ns)
+
+    except Exception as e:
+        import traceback
+        _error_detail_trace = traceback.format_exc()
+    finally:
+        # --- Restauration des builtins originaux ---
+        builtins.print = _original_print
+        builtins.input = _original_input
 
 
-if _error_detail_trace is None: # Pas d'erreur d'exécution
+# On lance notre fonction 'main' asynchrone et on attend sa complétion.
+await main()  
+
+# --- Traçage des variables (si pas d'erreur) ---
+if _error_detail_trace is None:
     for _var_name, _val in user_ns.items():
-        if _var_name.startswith('__') and _var_name.endswith('__'):
+        if _var_name.startswith('__') or isinstance(_val, (types.ModuleType, types.FunctionType, type)):
             continue
+        # ... (votre logique de filtrage existante) ...
         if _var_name in ['pyodide', 'sys', 'micropip', 'json', 'types', 'ast', 'traceback', 
                          'error_detail', 'current_code', 'user_python_code', 
                          'cfg_instance', 'mermaid_output', 'error_message', 'output_dict',
                          'parsed_code_string', 'List', 'Dict', 'Set', 'Tuple', 'Optional',
-                         '_syntax_check_result', '_error_detail_trace', 'user_ns', '_final_vars', # Exclure les variables du wrapper
-                         '_var_name', '_val' # Exclure les variables de boucle du wrapper
-                         ]:
-            continue
-        if isinstance(_val, (types.ModuleType, types.FunctionType, type, types.BuiltinFunctionType, types.BuiltinMethodType)):
+                         '_syntax_check_result', '_error_detail_trace', 'user_ns', '_final_vars',
+                         '_original_print', '_original_input', 'custom_print', 'custom_input', 's_io',
+                         'js_print_handler', 'js_input_handler', 'main',
+                         'turtle_setup_script', 'student_code_to_run',
+                         '_var_name', '_val']:
             continue
         
         if isinstance(_val, (str, int, float, bool, list, dict, tuple, set)) or _val is None:
             _final_vars[_var_name] = _val
         else:
             try:
-                _final_vars[_var_name] = repr(_val) 
+                _final_vars[_var_name] = repr(_val)
             except:
                 _final_vars[_var_name] = "<valeur non sérialisable>"
 
-# Retourne un dictionnaire avec les variables ou les détails de l'erreur
-json.dumps({"variables": _final_vars, "error": _error_detail_trace}) 
+# --- Retour du résultat ---
+# Le résultat de cette expression (un string JSON) sera retourné à JavaScript
+json.dumps({"variables": _final_vars, 
+"error": _error_detail_trace
+})
 `;
 
-    console.log("Wrapper de traçage passé à Pyodide pour le défi:", tracingWrapper);
+    console.log("Wrapper de traçage (avec I/O) passé à Pyodide:", tracingWrapper);
+    let tracedVariables = {};
     try {
+        // IMPORTANT: On utilise runPythonAsync car notre code est asynchrone (à cause de input)
         let resultJson = await pyodideInstance.runPythonAsync(tracingWrapper);
         if (resultJson) {
             const result = JSON.parse(resultJson);
             if (result.error) {
-                console.error("Erreur d'exécution lors du traçage pour le défi:", result.error);
-                alert(`Erreur lors de l'exécution de votre code Python:\n${result.error}`);
-                return {}; // Retourne un objet vide en cas d'erreur d'exécution
+                console.error("Erreur d'exécution Python capturée:", result.error);
+                const friendlyError = formatPythonError(result.error);
+                logToConsole(friendlyError, 'error');
+                return {}; // Retourne un objet vide en cas d'erreur
             }
             tracedVariables = result.variables;
         }
@@ -1140,11 +1576,13 @@ json.dumps({"variables": _final_vars, "error": _error_detail_trace})
 
     } catch (error) { // Erreur inattendue durant l'exécution du wrapper lui-même
         console.error("Erreur majeure lors de l'exécution tracée pour le défi (wrapper):", error);
-        alert(`Une erreur majeure est survenue lors de l'exécution de votre code : ${error.message}`);
-        tracedVariables = {}; 
+        const friendlyError = formatPythonError(error.message);
+        logToConsole(friendlyError, 'error');
+        tracedVariables = {};
     }
     return tracedVariables;
 }
+
 
 
 function checkStudentAnswers(correctVariableValues) {
@@ -1271,4 +1709,137 @@ function revealCorrectSolution(correctVariableValues) {
     const showSolBtn = document.getElementById('show-solution-btn');
     if (checkBtn) checkBtn.disabled = true;
     if (showSolBtn) showSolBtn.disabled = true;
+}
+// --- Gestion de la Console et des I/O personnalisées ---
+
+/**
+ * Affiche un message dans la console d'exécution.
+ * @param {string} message Le message à afficher.
+ * @param {string} type 'output' pour une sortie standard, 'error' pour une erreur.
+ */
+function logToConsole(message, type = 'output') {
+    const consoleOutput = document.getElementById('execution-console-output');
+    if (!consoleOutput) return;
+
+    const line = document.createElement('div');
+    line.className = type === 'error' ? 'text-danger' : 'text-light';
+    
+    // Crée un nœud de texte pour éviter l'interprétation HTML du message
+    line.appendChild(document.createTextNode(message));
+    
+    consoleOutput.appendChild(line);
+    consoleOutput.scrollTop = consoleOutput.scrollHeight; // Auto-scroll
+}
+
+/**
+ * Efface le contenu de la console d'exécution.
+ */
+function clearConsole() {
+    const consoleOutput = document.getElementById('execution-console-output');
+    if (consoleOutput) {
+        consoleOutput.innerHTML = '';
+    }
+}
+
+// Toggle affichage de la console d'exécution
+const consoleHeader = document.getElementById('execution-console-header');
+const consoleBody = document.getElementById('execution-console-body');
+if (consoleHeader && consoleBody) {
+    consoleHeader.addEventListener('click', function(e) {
+        // Ignore le clic sur le bouton "Effacer la console" pour pas que ça replie la card
+        if (e.target.closest('#clear-console-btn')) return;
+        if (consoleBody.style.display === "none") {
+            consoleBody.style.display = "";
+        } else {
+            consoleBody.style.display = "none";
+        }
+    });
+}
+
+/**
+ * Gère la fonction input() de Python en affichant un modal.
+ * Retourne une Promise qui se résout avec la saisie de l'utilisateur.
+ * @param {string} prompt Le message à afficher à l'utilisateur.
+ * @returns {Promise<string>}
+ */
+function handlePythonInput(prompt) {
+    console.log("DEBUG : Appel à handlePythonInput avec prompt:", prompt);
+    const inputModal = new bootstrap.Modal(document.getElementById('input-modal'));
+    const promptElement = document.getElementById('input-modal-prompt');
+    const inputField = document.getElementById('input-modal-field');
+    const submitButton = document.getElementById('input-modal-submit-btn');
+
+    promptElement.textContent = prompt || "";
+    inputField.value = '';
+
+    return new Promise((resolve) => {
+        const submitListener = () => {
+            const value = inputField.value;
+            // Nettoyer l'événement pour ne pas qu'il se cumule
+            submitButton.removeEventListener('click', submitListener);
+            inputField.removeEventListener('keydown', enterListener);
+            inputModal.hide();
+            resolve(value);
+        };
+
+        const enterListener = (event) => {
+            if (event.key === 'Enter') {
+                submitListener();
+            }
+        };
+
+        submitButton.addEventListener('click', submitListener);
+        inputField.addEventListener('keydown', enterListener);
+        
+        // Mettre le focus sur le champ de saisie une fois le modal affiché
+        document.getElementById('input-modal').addEventListener('shown.bs.modal', () => {
+            inputField.focus();
+        }, { once: true });
+
+        inputModal.show();
+    });
+}
+
+/**
+ * Formate une erreur Python en un message lisible pour un élève.
+ * @param {string} traceback Le traceback complet de Python.
+ * @returns {string} Un message d'erreur formaté et simplifié.
+ */
+function formatPythonError(traceback) {
+    if (!traceback) return "Une erreur inconnue est survenue.";
+
+    const lines = traceback.trim().split('\n');
+    const errorLine = lines[lines.length - 1]; // Ex: "NameError: name 'x' is not defined"
+
+    const match = errorLine.match(/^(\w+):\s*(.*)$/);
+    if (!match) return traceback; // Si le format est inattendu, on retourne le traceback brut.
+
+    const errorType = match[1];
+    const errorMessage = match[2];
+    let hint = "";
+
+    switch (errorType) {
+        case 'NameError':
+            hint = `'NameError': La variable ${errorMessage.split("'")[1]} a été utilisée avant d'avoir reçu une valeur. Avez-vous fait une faute de frappe ou oublié de l'initialiser ?`;
+            break;
+        case 'TypeError':
+            hint = "'TypeError': Vous avez essayé de faire une opération entre des types de données incompatibles. Par exemple, additionner un nombre et du texte (`5 + 'hello'`). Vérifiez que vos variables ont le bon type.";
+            break;
+        case 'IndexError':
+            hint = "'IndexError': Vous avez essayé d'accéder à un élément d'une liste ou d'une chaîne avec un indice qui n'existe pas. Par exemple, demander le 5ème élément d'une liste qui n'en a que 3.";
+            break;
+        case 'SyntaxError':
+            hint = `'SyntaxError': Votre code contient une erreur d'écriture. Vérifiez attentivement la ligne indiquée : les deux-points (\`:\`) à la fin des \`if\`/\`for\`/\`def\`, l'indentation (les espaces au début des lignes), et les parenthèses. Message original : ${errorMessage}`;
+            break;
+        case 'ValueError':
+            hint = `'ValueError': Une fonction a reçu un argument du bon type, mais avec une valeur inappropriée. Par exemple, \`int('abc')\`. Message original : ${errorMessage}`;
+            break;
+        case 'ZeroDivisionError':
+            hint = "'ZeroDivisionError': Vous avez tenté de diviser un nombre par zéro, ce qui est impossible en mathématiques.";
+            break;
+        default:
+            hint = "Une erreur est survenue. Lisez attentivement le message pour trouver un indice.";
+    }
+
+    return `Erreur détectée : ${errorLine}\n\n💡 Piste : ${hint}`;
 }
