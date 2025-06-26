@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Présentation de captures d'écran</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .gallery {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 20px;
+        }
+        .screenshot {
+            max-width: 100%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .screenshot:hover {
+            transform: scale(1.05);
+        }
+        .caption {
+            text-align: center;
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Présentation de captures d'écran</h1>
+    
+    <div class="gallery">
+        <div>
+            <img src="C:\Users\install\Documents\GitHub\algoypthon_accueil.png" alt="Description de l'image 1" class="screenshot">
+            <p class="caption">Accueil www.algopython.fr</p>
+        </div>
+        <div>
+            <img src="chemin/vers/image2.jpg" alt="Description de l'image 2" class="screenshot">
+            <p class="caption">Légende de l'image 2</p>
+        </div>
+        <div>
+            <img src="chemin/vers/image3.jpg" alt="Description de l'image 3" class="screenshot">
+            <p class="caption">Légende de l'image 3</p>
+        </div>
+        <!-- Ajoutez autant de div avec des images que nécessaire -->
+    </div>
+</body>
+</html>
