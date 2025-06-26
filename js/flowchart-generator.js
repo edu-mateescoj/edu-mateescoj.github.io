@@ -36,14 +36,13 @@ async function initPyodideAndLoadScript() {
         // Charger les packages Python nécessaires (ici, 'ast' est intégré, donc pas besoin de micropip pour lui).
         // Si autres dépendances non standard, il faudrait les charger.
         
-        
+/*        
         // Charger micropip, qui est nécessaire pour installer des paquets tiers
         console.log("Chargement de micropip...");
         await pyodide.loadPackage("micropip");
         const micropip = pyodide.pyimport("micropip");
         console.log("micropip chargé.");
-        
-       
+            
         // Installer pyodide-turtle directement depuis son URL de "wheel" (.whl) FICHIER LOCAL
         // C'est la méthode correcte car il n'est ni sur PyPI, ni dans les paquets par défaut.
         // const turtleWheelUrl = "./turtle-0.0.1-py3-none-any.whl"; 
@@ -51,7 +50,7 @@ async function initPyodideAndLoadScript() {
         console.log(`Installation de Turtle (version Vincent Bouillot) depuis ${turtleWheelUrl}...`);
         await micropip.install(turtleWheelUrl);
         console.log("Turtle (version Vincent Bouillot)  installé avec succès.");
-        
+*/        
 
         // Charger le contenu du script Python (MyCFG.py)
         const response = await fetch('MyCFG.py');
