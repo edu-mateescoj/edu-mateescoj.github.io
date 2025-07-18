@@ -13,12 +13,16 @@ const VAR_COUNT_LIMITS = {
 };
 
 const BUILTINS_BASE = [
-    { id: 'builtin-print', label: 'print()' }, { id: 'builtin-input', label: 'input()' },
-    { id: 'builtin-len', label: 'len()' }
+    { id: 'builtin-print', label: 'print()' },
+    { id: 'builtin-input', label: 'input()' },
+    { id: 'builtin-len', label: 'len()' },
+    { id: 'builtin-isinstance', label: 'isinstance()' }
 ];
 const BUILTINS_ADVANCED = [
-    { id: 'builtin-chr', label: 'chr()' }, { id: 'builtin-ord', label: 'ord()' },
-    { id: 'builtin-min', label: 'min()' }, { id: 'builtin-max', label: 'max()' },
+    { id: 'builtin-chr', label: 'chr()' }, 
+    { id: 'builtin-ord', label: 'ord()' },
+    { id: 'builtin-min', label: 'min()' }, 
+    { id: 'builtin-max', label: 'max()' },
     { id: 'builtin-sum', label: 'sum()' }
 ];
 
@@ -219,9 +223,10 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>`;
     const functionsOptionsHTML_Base = `
         <div class="d-flex flex-column gap-1">
+            <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-simple"><label class="form-check-label small" for="func-def-simple">def f()</label></div>
             <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-a"><label class="form-check-label small" for="func-def-a">def f(a)</label></div>
-            <div class="form-check form-check-inline" id="func-builtins-main-container"></div>
             <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-return"><label class="form-check-label small" for="func-return">return</label></div>
+            <div class="form-check form-check-inline" id="func-builtins-main-container"></div>
         </div>`;
 
     // --- Gestion du chargement des exemples prédéfinis ---
@@ -270,20 +275,45 @@ document.addEventListener('DOMContentLoaded', function() {
     }
         
     // --- Fonctions Utilitaires ---
-    function populateSelectWithOptions(selectElement, min, max, currentSelectedVal) {
+    function populateSelectWithOptions(selectElement, min, max, valueToSelect) {
         if (!selectElement) return;
-        const previousValue = parseInt(selectElement.value);
-        selectElement.innerHTML = '';
+        
+        // Sauvegarder la valeur qui doit être sélectionnée.
+        const targetValue = valueToSelect;
+        // Sauvegarder la valeur précédente pour comparaison
+        const previousValue = selectElement.value;
+
+        selectElement.innerHTML = ''; // Vider les options existantes
+
         for (let i = min; i <= max; i++) {
             const option = new Option(i, i); // text, value
             selectElement.add(option);
         }
-        if (!isNaN(currentSelectedVal) && currentSelectedVal >= min && currentSelectedVal <= max) {
-            selectElement.value = currentSelectedVal;
-        } else if (!isNaN(previousValue) && previousValue >= min && previousValue <= max) {
-            selectElement.value = previousValue;
+
+        // Définir la valeur sélectionnée.
+        // Si la valeur cible est valide, on la sélectionne.
+        // Sinon, on se rabat sur le minimum possible par sécurité.
+        if (targetValue >= min && targetValue <= max) {
+            selectElement.value = targetValue;
         } else {
             selectElement.value = min;
+        }
+        // Si la valeur a changé, mettre en évidence le label
+        if (previousValue !== selectElement.value) {
+            // Trouver le label associé
+            const label = selectElement.closest('.form-group')?.querySelector('label');
+            if (label) {
+                const originalColor = label.style.color;
+                label.style.transition = "color 0.5s ease";
+                label.style.color = "#0d6efd"; // Bleu Bootstrap
+                
+                setTimeout(() => {
+                    label.style.color = originalColor;
+                    setTimeout(() => {
+                        label.style.transition = "";
+                    }, 500);
+                }, 2000);
+            }
         }
     }
 
@@ -308,6 +338,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const updateDOM = () => {
                 if (checkbox.checked) {
                     targetContainer.innerHTML = section.baseHtmlGetter();
+                    //  Logique pour cocher l'option de base par défaut
+                    if (section.checkboxId === 'frame-conditions') {
+                        const ifCheckbox = targetContainer.querySelector('#cond-if');
+                        if (ifCheckbox) ifCheckbox.checked = true;
+                    } else if (section.checkboxId === 'frame-functions') {
+                        const funcSimpleCheckbox = targetContainer.querySelector('#func-def-simple');
+                        if (funcSimpleCheckbox) funcSimpleCheckbox.checked = true;
+                    }
                     const internalContainer = targetContainer.querySelector('.d-flex.flex-column.gap-1');
                     if (internalContainer && section.advancedHandler) {
                         section.advancedHandler(internalContainer, advancedModeCheckbox.checked);
@@ -571,7 +609,7 @@ document.addEventListener('DOMContentLoaded', function() {
         let minTotalLines = MIN_POSSIBLE_CODE_LINES;
         let minTotalVariables = 0; // Commence à 0, car on compte explicitement
         let conceptualDifficultyScore = 0; // heuristique un peu bidon... à revoir
-        // Score de difficulté *conceptuelle* ?? basé sur les options sélectionnées
+        // idée future: un score de difficulté *conceptuelle* ?? basé sur les options sélectionnées
 
         const getChecked = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
         // prendre le type et utiliser VAR_COUNT_LIMITS si le sélecteur n'est pas là ou non visible
@@ -628,51 +666,107 @@ document.addEventListener('DOMContentLoaded', function() {
             if (getChecked('cond-if-if-if')) { minTotalLines += baseCondLines * 2; conceptualDifficultyScore += 8; if(minTotalVariables < 3 && explicitVarDeclarations < 3) minTotalVariables = Math.max(minTotalVariables, 3);}
         }
 
-        // 4. Boucles (Loop) - Adapter la logique comme pour les conditions
-        let loopSpecificVars = 0; // Variables spécifiquement pour les boucles (itération, bornes)
-        if (getChecked('loop-for-range')) { loopSpecificVars = Math.max(loopSpecificVars, 1); /* i */ }
-        if (getChecked('loop-range-ab')) { loopSpecificVars = Math.max(loopSpecificVars, 2); /* a, b (si pas déjà des vars) */ }
-        if (getChecked('loop-range-abs')) { loopSpecificVars = Math.max(loopSpecificVars, 3); /* a, b, s */ }
-        // Les variables de for sur list/str sont souvent la variable d'itération.
-        // La liste/str elle-même est comptée dans varCounts.
-        
-        // On n'ajoute loopSpecificVars à minTotalVariables que si elles ne sont pas déjà couvertes par explicitVarDeclarations.
-        // C'est compliqué... pour l'instant, on s'assure juste que minTotalVariables est assez grand.
-        if (getChecked('frame-loops')) {
-            minTotalVariables = Math.max(minTotalVariables, loopSpecificVars);
+    // 4. Boucles (Loop) - NOUVELLE LOGIQUE QUI COMPTE CHAQUE BOUCLE INDÉPENDAMMENT
+    if (getChecked('frame-loops')) {
+        // Compter chaque boucle séparément, plutôt qu'un calcul du maximum
+        if (getChecked('loop-for-range')) {
+            minTotalLines += 2;
+            minTotalVariables += 1; // Variable d'itération i
         }
-        // ... (reprendre la logique de calcul de minTotalLines et conceptualDifficultyScore pour les boucles)
-
-        let baseLoopLines = 0; let loopVarCount = 0; let loopImpact = 0;
-        if (getChecked('loop-for-range')) { baseLoopLines=2; loopVarCount=1; loopImpact=3;}
-        if (getChecked('loop-for-list') || getChecked('loop-for-str')) { baseLoopLines=Math.max(baseLoopLines,2); loopVarCount=Math.max(loopVarCount,1); loopImpact=Math.max(loopImpact,4);}
-        if (getChecked('loop-while')) { baseLoopLines=Math.max(baseLoopLines,2); loopVarCount=Math.max(loopVarCount,1); loopImpact=Math.max(loopImpact,5);}
-
-        if (baseLoopLines > 0) {
+        
+        if (getChecked('loop-for-list')) {
+            minTotalLines += 2;
+            minTotalVariables += 1; // Variable d'itération pour liste
+            if (varCounts.list === 0) { // Si pas de liste explicitement demandée
+                minTotalVariables += 1; // Une liste nécessaire
+            }
+        }
+        
+        if (getChecked('loop-for-str')) {
+            minTotalLines += 2;
+            minTotalVariables += 1; // Variable d'itération pour chaîne
+            if (varCounts.str === 0) { // Si pas de chaîne explicitement demandée
+                minTotalVariables += 1; // Une chaîne nécessaire
+            }
+        }
+        
+        if (getChecked('loop-while')) {
+            minTotalLines += 3; // +1 pour init compteur
+            minTotalVariables += 1; // Variable de compteur
+        }
+/*
+            if (baseLoopLines > 0) {
             minTotalLines += baseLoopLines;
             minTotalVariables = Math.max(minTotalVariables, loopVarCount); // Les variables de boucle s'ajoutent si nécessaire
             conceptualDifficultyScore += loopImpact;
             if (getChecked('loop-nested-for2')) { minTotalLines +=2; minTotalVariables = Math.max(minTotalVariables, loopVarCount+1); conceptualDifficultyScore += 6;}
             if (getChecked('loop-nested-for3')) { minTotalLines +=4; minTotalVariables = Math.max(minTotalVariables, loopVarCount+2); conceptualDifficultyScore += 9;}
         }
-        if (getChecked('loop-range-ab')) { conceptualDifficultyScore += 2; minTotalVariables = Math.max(minTotalVariables, 2); } // a, b
-        if (getChecked('loop-range-abs')) { conceptualDifficultyScore += 3; minTotalVariables = Math.max(minTotalVariables, 3); } // a, b, s
-        if (getChecked('loop-while-op')) { conceptualDifficultyScore += 1; if(minTotalVariables < 2 && explicitVarDeclarations < 2) minTotalVariables = Math.max(minTotalVariables, 2);}
-
+  */
+        // Garder les options avancées
+        if (getChecked('loop-nested-for2')) { 
+            minTotalLines += 2; 
+            minTotalVariables += 1; 
+            conceptualDifficultyScore += 6;
+        }
+        if (getChecked('loop-nested-for3')) { 
+            minTotalLines += 4; 
+            minTotalVariables += 2; 
+            conceptualDifficultyScore += 9;
+        }
+        
+        if (getChecked('loop-range-ab')) { 
+            conceptualDifficultyScore += 2; 
+            minTotalVariables = Math.max(minTotalVariables, 2); 
+        } // a, b
+        if (getChecked('loop-range-abs')) { 
+            conceptualDifficultyScore += 3; 
+            minTotalVariables = Math.max(minTotalVariables, 3); 
+        } // a, b, s
+        if (getChecked('loop-while-op')) { 
+            conceptualDifficultyScore += 1; 
+            if(minTotalVariables < 2 && explicitVarDeclarations < 2) 
+                minTotalVariables = Math.max(minTotalVariables, 2);
+        }
+    }
 
         // 5. Fonctions (Func)
-        if (getChecked('frame-functions')) {
-            minTotalLines += 2; // def f(): pass
-            conceptualDifficultyScore += 5;
+        if (getChecked('frame-functions') && (getChecked('func-def-simple') || getChecked('func-def-a') || getChecked('func-def-ab'))) {
             let funcParams = 0;
-            if (getChecked('func-def-a')) funcParams = 1;
-            if (getChecked('func-def-ab')) funcParams = Math.max(funcParams, 2);
+            let funcDefLines = 0;
+            
+            if (getChecked('func-def-simple')) {
+                funcDefLines = 2; // def f(): pass
+                conceptualDifficultyScore += 4;
+            }
+            if (getChecked('func-def-a')) {
+                funcParams = 1;
+                funcDefLines = Math.max(funcDefLines, 2);
+                conceptualDifficultyScore = Math.max(conceptualDifficultyScore, 5);
+            }
+            if (getChecked('func-def-ab')) {
+                funcParams = Math.max(funcParams, 2);
+                funcDefLines = Math.max(funcDefLines, 2);
+                conceptualDifficultyScore = Math.max(conceptualDifficultyScore, 6);
+            }
+            
+            minTotalLines += funcDefLines;
             minTotalVariables = Math.max(minTotalVariables, funcParams);
             
             if (getChecked('func-return')) { minTotalLines +=1; conceptualDifficultyScore += 2; }
-            if (getChecked('func-builtins')) { minTotalLines +=1; conceptualDifficultyScore += 1; }
             if (getChecked('func-op-list')) { minTotalLines +=1; conceptualDifficultyScore += 3; if (varCounts.list === 0 && explicitVarDeclarations < 1) minTotalVariables = Math.max(minTotalVariables, 1);}
             if (getChecked('func-op-str')) { minTotalLines +=1; conceptualDifficultyScore += 3; if (varCounts.str === 0 && explicitVarDeclarations < 1) minTotalVariables = Math.max(minTotalVariables, 1);}
+            
+            // Ligne pour l'appel de la fonction
+            minTotalLines +=1; 
+
+            // Lignes supplémentaires pour l'appel si des variables sont déclarées
+            if (funcParams > 0 && explicitVarDeclarations > 0) {
+                minTotalLines += funcParams; 
+            }
+            if (getChecked('func-return') && explicitVarDeclarations > 0) {
+                minTotalLines += 1; // Ligne pour utiliser la valeur de retour
+            }
             // Prise en compte des builtins sélectionnés
             if (getChecked('func-builtins')) {
                 conceptualDifficultyScore += 1; // Le fait d'utiliser des builtins ajoute un peu
@@ -721,26 +815,40 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateGlobalConfigSelectors() {
         const { minLines, minVariables } = calculateGlobalRequirements();
         
-        const currentNumLinesVal = numLinesGlobalSelect ? parseInt(numLinesGlobalSelect.value) : minLines;
-        const currentNumTotalVariablesVal = numTotalVariablesGlobalSelect ? parseInt(numTotalVariablesGlobalSelect.value) : minVariables;
+        // choisi de toujours utiliser minLines et minVariables à la place => variables devenu obsolètes
+        // const currentNumLinesVal = numLinesGlobalSelect ? parseInt(numLinesGlobalSelect.value) : minLines;
+        // const currentNumTotalVariablesVal = numTotalVariablesGlobalSelect ? parseInt(numTotalVariablesGlobalSelect.value) : minVariables;
 
-        populateSelectWithOptions(numLinesGlobalSelect, minLines, MAX_CODE_LINES, currentNumLinesVal);
-        populateSelectWithOptions(numTotalVariablesGlobalSelect, minVariables, MAX_TOTAL_VARIABLES_GLOBAL, currentNumTotalVariablesVal);
-        // console.log("Sélecteurs de configuration globale (Longueur, Nb Total Vars) mis à jour.");
+        // Mettre à jour le nombre de lignes disponibles, avec minLines comme minimum
+        populateSelectWithOptions(numLinesGlobalSelect, minLines, MAX_CODE_LINES, minLines);
+            // Si la valeur actuelle est inférieure au nouveau minimum, utiliser le minimum
+            // Math.max(currentNumLinesVal, minLines));
+
+        // Même chose pour le nombre de variables
+        populateSelectWithOptions(numTotalVariablesGlobalSelect, minVariables, MAX_TOTAL_VARIABLES_GLOBAL, minVariables);
+                // Math.max(currentNumTotalVariablesVal, minVariables));
     }
 
     // --- Attachement des listeners 
     // pour la mise à jour des sélecteurs globaux ET interdépendances ---
     // Le listener sur syntaxConfigArea et advancedModeCheckbox appellera déjà updateGlobalConfigSelectors
     // et handleVisualInterdependencies avec un setTimeout.
-    // Délégation pour toutes les checkboxes de syntaxe (base et avancées)
+    // Délégation pour toutes les options de syntaxe (base et avancées)
     const syntaxConfigArea = document.querySelector('.card-body .row.g-2.flex-wrap.align-items-start');
     if (syntaxConfigArea) {
-        syntaxConfigArea.addEventListener('change', function(event) {
-            if (event.target.type === 'checkbox' || event.target.classList.contains('var-count-select')) {
-                setTimeout(updateGlobalConfigSelectors, 50); // Délai pour le DOM
-                // Gérer les interdépendances visuelles après chaque changement de syntaxe
-                setTimeout(handleVisualInterdependencies, 60); // Léger décalage
+        // On utilise 'click' pour une réactivité immédiate à chaque interaction.
+        syntaxConfigArea.addEventListener('click', function(event) {
+            // On vérifie que le clic vient bien d'une option pour éviter de se déclencher sur des clics "vides".
+            if (event.target.matches('input[type="checkbox"], label, select')) {
+            // Peu importe la cible exacte du clic (label, input, etc.),
+            // toute interaction dans cette zone doit déclencher une mise à jour.
+            
+            // On utilise setTimeout pour s'assurer que l'état de la checkbox (cochée/décochée)
+            // est bien mis à jour dans le DOM avant de lancer les calculs.
+                setTimeout(() => {
+                    updateGlobalConfigSelectors();
+                    handleVisualInterdependencies();
+                }, 50); // Un court délai est suffisant.
             }
         });
     }
@@ -748,11 +856,21 @@ document.addEventListener('DOMContentLoaded', function() {
     // et handleVisualInterdependencies via son propre setTimeout.
     // On s'assure juste que handleVisualInterdependencies est aussi appelé.
     // // Listener direct pour le mode avancé car il affecte ce qui est disponible pour le calcul
-    if (advancedModeCheckbox) { // advancedModeCheckbox est déjà défini plus haut
+    if (advancedModeCheckbox) { 
         advancedModeCheckbox.addEventListener('change', () => {
-            // updateGlobalConfigSelectors est déjà appelé par le listener du mode avancé dans la section précédente
-            // On ajoute juste l'appel pour les interdépendances ici aussi, après que les options avancées soient (dés)injectées
-            setTimeout(handleVisualInterdependencies, 150); // Un délai un peu plus long pour être sûr
+            // ... (code existant du listener du mode avancé) ...
+            // Il appelle déjà updateGlobalConfigSelectors() et handleVisualInterdependencies().
+            // On peut simplifier en s'assurant qu'il le fait bien.
+            const isAdvanced = advancedModeCheckbox.checked;
+            addAdvancedOperationOptionsIfNeeded(isAdvanced);
+            const condContainer = document.querySelector('#conditions-options-container > .d-flex.flex-column.gap-1'); if (condContainer) addAdvancedConditionOptionsIfNeeded(condContainer, isAdvanced);
+            const loopContainer = document.querySelector('#loops-options-container > .d-flex.flex-column.gap-1'); if (loopContainer) addAdvancedLoopOptionsIfNeeded(loopContainer, isAdvanced);
+            const funcBaseOptsContainer = document.querySelector('#functions-options-container > .d-flex.flex-column.gap-1'); if (funcBaseOptsContainer) addAdvancedFunctionOptionsIfNeeded(funcBaseOptsContainer, isAdvanced);
+            
+            setTimeout(() => {
+                updateGlobalConfigSelectors();
+                handleVisualInterdependencies();
+            }, 100); // Un délai légèrement plus long pour laisser le temps aux options d'être ajoutées/supprimées.
         });
     }
     // Le listener pour difficultyGlobalSelect N'EST PLUS NÉCESSAIRE ici pour appeler updateGlobalConfigSelectors,
@@ -913,19 +1031,22 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Fonctions (Func)
                 main_functions: getChecked('frame-functions'),
+                func_def_simple: getChecked('func-def-simple'),
                 func_def_a: getChecked('func-def-a'),
                 // func_builtins: getChecked('func-builtins'), // La case principale builtins
                 // Builtins spécifiques (seront false si #func-builtins n'est pas cochée car ils ne seront pas dans le DOM)
                 builtin_print: getChecked('builtin-print'),
                 builtin_input: getChecked('builtin-input'),
                 builtin_len: getChecked('builtin-len'),
+                func_return: getChecked('func-return'),
+                
+                builtin_isinstance: getChecked('builtin-isinstance'), 
                 builtin_chr: getChecked('builtin-chr'),   // Avancé
                 builtin_ord: getChecked('builtin-ord'),   // Avancé
                 builtin_min: getChecked('builtin-min'),   // Avancé
                 builtin_max: getChecked('builtin-max'),   // Avancé
                 builtin_sum: getChecked('builtin-sum'),   // Avancé
                 
-                func_return: getChecked('func-return'),
                 func_def_ab: getChecked('func-def-ab'),     // Avancé
                 func_op_list: getChecked('func-op-list'),   // Avancé
                 func_op_str: getChecked('func-op-str'),     // Avancé
@@ -960,6 +1081,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const showSolBtn = document.getElementById('show-solution-btn');
             if(checkBtn) checkBtn.disabled = true;
             if(showSolBtn) showSolBtn.disabled = true;
+            // Mettre à jour les sélecteurs globaux après la génération
+            // pour s'assurer qu'ils sont cohérents pour le *FUTUR* code généré
+            updateGlobalConfigSelectors();
         });
     } else {
         console.warn("Bouton 'generate-code-btn' non trouvé.");
@@ -1377,7 +1501,8 @@ z = x + y`;
     // État initial des cartes
     setDiagramAndChallengeCardState("default");
 
-}); // Fin de DOMContentLoaded
+}
+); // Fin de DOMContentLoaded
 
 
 // --- Fonctions pour le Défi (déplacées de l'intérieur de DOMContentLoaded pour être globales si nécessaire, mais restent dans ce scope) ---
@@ -1425,7 +1550,7 @@ turtle.Screen().setup(target_id='turtle-canvas')
 
     // On passe le code à Pyodide via des variables globales, pas par injection de chaîne.
     // beaucoup plus robuste ??
-    pyodideInstance.globals.set("turtle_setup_script", turtleSetupCode);
+    // pyodideInstance.globals.set("turtle_setup_script", turtleSetupCode);
     pyodideInstance.globals.set("student_code_to_run", code); // On passe le code brut ici
     // On utilise une variable globale pour le code de l'élève:
     /* PLUS BESOIN D'ECHAPPER LES GUILLEMETS TRIPLES
@@ -1451,6 +1576,47 @@ import asyncio
 import pyodide ###############################################
 from pyodide.ffi import to_js
 import ast
+
+# --- Analyse du code pour trouver les appels de fonctions ---
+# --- et retourner les valeurs pour le défi ---
+
+def extract_function_calls(code):
+    try:
+        tree = ast.parse(code)
+        calls = []
+        
+        class FunctionCallExtractor(ast.NodeVisitor):
+            def visit_Assign(self, node):
+                if isinstance(node.value, ast.Call):
+                    call = node.value
+                    if isinstance(call.func, ast.Name):
+                        # Stocker l'information sur l'appel: nom de la fonction et variable de résultat
+                        calls.append({
+                            'func_name': call.func.id,
+                            'result_var': node.targets[0].id if isinstance(node.targets[0], ast.Name) else None
+                        })
+                self.generic_visit(node)
+            
+            def visit_Expr(self, node):
+                # Cas où une fonction est appelée sans affecter le résultat
+                if isinstance(node.value, ast.Call):
+                    call = node.value
+                    if isinstance(call.func, ast.Name):
+                        # Stocker l'information sur l'appel sans variable de résultat
+                        calls.append({
+                            'func_name': call.func.id,
+                            'result_var': None
+                        })
+                self.generic_visit(node)
+        
+        extractor = FunctionCallExtractor()
+        extractor.visit(tree)
+        return calls
+    except:
+        return []
+# ---- Fin de l'analyse du code pour les appels de fonctions ---
+# --------------------------------------------------------------
+
 
 class AwaitInputTransformer(ast.NodeTransformer):
     def visit_Call(self, node):
@@ -1503,7 +1669,7 @@ async def main():
         # Il va gérer les 'await' implicites sur les fonctions comme notre custom_input.
         
         # On exécute d'abord le code de configuration de Turtle (qui est synchrone)
-        exec(turtle_setup_script, user_ns)
+        # exec(turtle_setup_script, user_ns)
         
         tree = ast.parse(student_code_to_run)
         transformed_tree = AwaitInputTransformer().visit(tree)
@@ -1512,6 +1678,26 @@ async def main():
 
         # CORRECTION POUR PROBLÈME COROUTINE !!
         await pyodide.code.eval_code_async(transformed_code_string, globals=user_ns)
+
+        # On ajoute du code pour capturer les résultats des fonctions
+        function_calls = extract_function_calls(student_code_to_run)
+        for call_info in function_calls:
+            if call_info['func_name'] in user_ns and callable(user_ns[call_info['func_name']]):
+                func_name = call_info['func_name']
+                # Vérifier si la fonction est définie dans l'espace utilisateur
+                if not call_info['result_var'] and hasattr(user_ns[func_name], '__code__'):
+                    # Si la fonction est appelée sans stocker le résultat, on ajoute une variable pour le défi
+                    try:
+                        # Récupérer les paramètres d'appel potentiels depuis le code
+                        # Ceci est une simplification, idéalement on analyserait l'AST pour les arguments exacts
+                        # Pour simplifier, on teste avec un argument entier, ce qui fonctionnera dans les cas simples
+                        result = user_ns[func_name](4)  # Essai avec 4 comme argument
+                        # Créer une variable pour stocker ce résultat
+                        result_var_name = f"{func_name}_result"
+                        user_ns[result_var_name] = result
+                    except:
+                        # En cas d'erreur (mauvais nombre d'arguments, etc.), on ignore simplement
+                        pass
 
     except Exception as e:
         import traceback
