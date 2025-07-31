@@ -6,7 +6,7 @@
     <title>Outil de Création d'Exercices Python</title>
     
     <!-- Inclusion de Pyodide EN PREMIER -->
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
 
     <!-- Inclusion de Bootstrap - thèem Replit - pour le style -->
     <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
@@ -106,11 +106,16 @@
             background-color: rgba(40, 167, 69, 0.1); /* Fond très léger pour renforcer la suggestion */
         }
 
+        .card {
+            transition: border-color 0.3s;
+        }
+
         /* Style pour surligner un select (par exemple, le compteur de booléens) */
         select.suggestion-highlight-select {
             border-color: #28a745 !important; /* Vert Bootstrap */
             box-shadow: 0 0 0 0.25rem rgba(40, 167, 69, .25) !important; /* Ombre de focus Bootstrap success */
         }
+
     </style>
 
 </head>
@@ -168,8 +173,10 @@
                         </div>
                                         
                         <!-- Section Mode Avancé -->
-                        <div class="advanced-mode-container d-flex justify-content-between align-items-center">
+                         <!-- ajouté la classe d-none pour masquer le mode avancé par défaut -->
+                        <div class="advanced-mode-container d-flex justify-content-between align-items-center d-none">
                             <div>
+                                <!-- ajouter l'attribut checked pour faire comme si la case était cochée par défaut -->
                                 <input type="checkbox" class="form-check-input me-1" id="advanced-mode">
                                 <label class="form-check-label fw-bold small" for="advanced-mode">
                                     <i class="fas fa-cogs me-1"></i> Mode avancé
@@ -355,7 +362,7 @@
                         <div class="col-md-4 col-sm-6">
                             <div class="form-group">
                                 <label for="num-lines-global" class="form-label"> <!-- Changé l'ID -->
-                                    <i class="fas fa-align-left me-1"></i> Nb. Lignes (approx.)
+                                    <i class="fas fa-align-left me-1"></i> Nb. Lignes Min
                                 </label>
                                 <select class="form-select" id="num-lines-global">
                                     <!-- Les options seront peuplées par JavaScript -->
@@ -419,6 +426,24 @@
                 </div>
                 <!-- Zone d'édition de code -->
                 <textarea id="code-editor"></textarea>
+                <div id="code-toolbar" class="d-flex align-items-center justify-content-start py-1 px-2" style="background: #23272b; border-radius: 0 0 0.25rem 0.25rem; border-top: 1px solid #444; font-size: 1rem;">
+                    <button id="toggle-editable-btn" class="btn btn-sm btn-outline-light me-2" title="Rendre non éditable">
+                        <i class="fas fa-edit"></i>
+                </button>
+                    <button id="download-code-btn" class="btn btn-sm btn-outline-light me-2" title="Sauver le code dans un fichier .py">
+                <i class="fas fa-download"></i>
+                </button>
+                <button id="open-file-btn" class="btn btn-sm btn-outline-light me-2" title="Ouvrir un fichier .py">
+                    <i class="fas fa-folder-open"></i>
+                    <input type="file" id="file-input" accept=".py" style="display:none;">
+                </button>
+                <button id="share-code-btn" class="btn btn-sm btn-outline-light me-2" title="Copier dans le presse-papier">
+                    <i class="fas fa-share-alt"></i>
+                </button>
+                <button id="reload-code-btn" class="btn btn-sm btn-outline-light" title="Restaurer le code à la dernière génération/chargement">
+                    <i class="fas fa-undo"></i>
+                </button>
+                </div>
             </div>
         </div>
     </div>
@@ -485,6 +510,42 @@
     </div>
 </div>
 
+<!-- Section Console d'Exécution -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center"
+                id="execution-console-header" style="cursor:pointer;">
+                <h2 class="h5 mb-0"><i class="fas fa-terminal me-2"></i>Console d'Exécution</h2>
+                <button id="clear-console-btn" class="btn btn-sm btn-outline-light" title="Effacer la console">
+                    <i class="fas fa-eraser"></i> Effacer
+                </button>
+            </div>
+            <div class="card-body bg-black p-0" id="execution-console-body" style="display:none;">
+                <pre id="execution-console-output" class="text-white m-0 p-3" style="min-height: 100px; white-space: pre-wrap; word-wrap: break-word;"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal pour la fonction input() -->
+<div class="modal fade" id="input-modal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-labelledby="input-modal-label" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="input-modal-label">Saisie Requise</h5>
+            </div>
+            <div class="modal-body">
+                <p id="input-modal-prompt"></p>
+                <input type="text" class="form-control" id="input-modal-field">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="input-modal-submit-btn">Valider</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Modal de Feedback -->
 <div class="modal fade" id="feedback-modal" tabindex="-1" aria-labelledby="feedback-modal-label" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
@@ -516,7 +577,27 @@
             </div>
         </div>
     </div>
-</div>      
+</div> 
+
+<!-- Section Affichage Graphique Turtle -->
+<div class="row mt-4" id="turtle-graphics-card" style="display: none;"> <!-- Initialement masquée -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                <h2 class="h5 mb-0"><i class="fas fa-paint-brush me-2"></i>Affichage Graphique (Turtle)</h2>
+                <button id="clear-turtle-canvas-btn" class="btn btn-sm btn-outline-light" title="Effacer le dessin">
+                    <i class="fas fa-eraser"></i> Effacer
+                </button>
+            </div>
+
+            <!-- HEURISTIQUE pyo_js : ajouter un ID au conteneur du canvas incluant "term" -->
+            <div id="turtle-terminal" class="card-body text-center p-2">
+                <canvas id="turtle-canvas" width="600" height="400" style="background-color: #f0f0f0; border-radius: 4px; max-width: 100%;"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
         <!-- JavaScript  -->
         <script src="js/codes-exemples.js"></script>
         <script src="js/code-generator.js"></script>
