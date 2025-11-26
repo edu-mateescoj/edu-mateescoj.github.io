@@ -1,4 +1,11 @@
 // js/main.js
+/**
+ * @file main.js
+ * Fichier principal orchestrant l'ensemble de l'interface utilisateur.
+ * Gère l'initialisation de l'éditeur, les gestionnaires d'événements pour les boutons,
+ * la configuration de la génération de code, et la communication avec le moteur Pyodide.
+ * Il délègue la logique spécifique au "Défi" au module validation.js.
+ */
 const MAX_CODE_LINES = 30;
 const MAX_TOTAL_VARIABLES_GLOBAL = 20;
 const MIN_POSSIBLE_CODE_LINES = 3;
@@ -13,24 +20,62 @@ const VAR_COUNT_LIMITS = {
 };
 
 const BUILTINS_BASE = [
-    { id: 'builtin-print', label: 'print()' }, { id: 'builtin-input', label: 'input()' },
-    { id: 'builtin-len', label: 'len()' }
+    { id: 'builtin-print', label: 'print()' },
+    { id: 'builtin-input', label: 'input()' },
+    { id: 'builtin-len', label: 'len()' },
+    { id: 'builtin-isinstance', label: 'isinstance()' }
 ];
 const BUILTINS_ADVANCED = [
-    { id: 'builtin-chr', label: 'chr()' }, { id: 'builtin-ord', label: 'ord()' },
-    { id: 'builtin-min', label: 'min()' }, { id: 'builtin-max', label: 'max()' },
+    { id: 'builtin-chr', label: 'chr()' },
+    { id: 'builtin-ord', label: 'ord()' },
+    { id: 'builtin-min', label: 'min()' },
+    { id: 'builtin-max', label: 'max()' },
     { id: 'builtin-sum', label: 'sum()' }
 ];
 
+const conditionsOptionsHTML_Base = `
+    <div class="d-flex flex-column gap-1">
+        <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_simple" type="checkbox" id="cond-if"><label class="form-check-label small" for="cond-if">if:</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_else" data-ctrl-parent="cond-if" type="checkbox" id="cond-if-else"><label class="form-check-label small" for="cond-if-else">if:_else:</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_elif" data-ctrl-parent="cond-if" type="checkbox" id="cond-if-elif"><label class="form-check-label small" for="cond-if-elif">if:_elif:</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_elif_else" data-ctrl-parents="cond-if,cond-if-elif" type="checkbox" id="cond-if-elif-else"><label class="form-check-label small" for="cond-if-elif-else">elif:_else:</label></div>
+    </div>`;
+const loopsOptionsHTML_Base = `
+    <div class="d-flex flex-column gap-1">
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-for-range"><label class="form-check-label small" for="loop-for-range">for_range</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-for-list"><label class="form-check-label small" for="loop-for-list">for_List</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-for-str"><label class="form-check-label small" for="loop-for-str">for_Str</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-while"><label class="form-check-label small" for="loop-while">while_</label></div>
+    </div>`;
+const functionsOptionsHTML_Base = `
+    <div class="d-flex flex-column gap-1">
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-simple"><label class="form-check-label small" for="func-def-simple">def</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-a"><label class="form-check-label small" for="func-def-a">def f(a)</label></div>
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-return"><label class="form-check-label small" for="func-return">return</label></div>
+        <div class="form-check form-check-inline" id="func-builtins-main-container"></div>
+    </div>`;
 
 
-// --- Gestion des boutons de l’éditeur de code: mode édition, régénération, ...  ---
+// --- Variables d'état globales ---
 let lastLoadedCode = ""; // Pour restaurer l'état après génération/chargement
 let isEditorEditable = false;
-// variable d'état globale : permet à tout le JS de savoir si l'éditeur est éditable ou non
+var codeEditorInstance;
+let variableValuesFromExecution = {}; // Pour stocker les valeurs des variables après l'exécution du code
+let lastDiagramAstDump = ""; // Pour la synchronisation diagramme/code
+let lastLoggedCanonicalCode = ""; // Stocke le dernier code normalisé qui a été journalisé
+let currentChallengeCodeId = null; // Pour stocker l'ID du code de défi actuel
 
-// ATTENTION... AUSSI listener pour le bouton (toggleBtn: référence à l'élément bouton)
+// --- Variables DOM globales (déclarées ici pour être accessibles partout) ---
+let difficultyGlobalSelect;
+let numLinesGlobalSelect;
+let numTotalVariablesGlobalSelect;
+let advancedModeCheckbox;
+let challengeVariablesContainer;
+let checkAnswersButton;
+let showSolutionButton;
+let feedbackModal;
 
+// --- Fonctions de gestion de l'éditeur ---
 function setEditorEditable(editable) {
     isEditorEditable = editable;
     if (codeEditorInstance) {
@@ -44,359 +89,334 @@ function setEditorEditable(editable) {
     }
 }
 
-var codeEditorInstance;
-document.addEventListener('DOMContentLoaded', function() {
+// --- Mémoriser le code après génération ou chargement d'exemple ---
+function memorizeLoadedCode(code) {
+    lastLoadedCode = code;
+}
 
-    codeEditorInstance = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
-        mode: 'python', 
-        theme: 'dracula', 
-        lineNumbers: true, 
-        firstLineNumber: 0,
-        indentUnit: 4,
-        tabSize: 4, 
-        indentWithTabs: false, 
-        lineWrapping: true, 
-        readOnly: !isEditorEditable // Initialement non éditable
+// --- Fonctions pour ajouter/supprimer les options AVANCÉES ---
+// NOTE: Ces fonctions sont déplacées avant leur utilisation pour corriger les erreurs de référence.
 
-    });
-    
-    // 1er bouton: Toggle éditable
-    const toggleBtn = document.getElementById('toggle-editable-btn');
-    if (toggleBtn) {
-        toggleBtn.addEventListener('click', () => setEditorEditable(!isEditorEditable));
-    }
+// Gère les options avancées pour le cadre "Op" (opérateurs logiques, slicing)
+function addAdvancedOperationOptionsIfNeeded(isAdvancedModeActiveOverride = null) {
+    const opOptionsDiv = document.getElementById('operations-options');
+    if (!opOptionsDiv) return;
+    const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
+                       (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
+    const advancedOpOptions = [
+        { id: 'op-and', label: 'and' }, { id: 'op-or', label: 'or' }, { id: 'op-not', label: 'not' },
+        { id: 'op-slice-ab', label: '[:]' }, // Slicing simple [a:b]
+        { id: 'op-slice-abs', label: '[::]' } // Slicing avec step [a:b:s]
+    ];
 
-    // 2ème: Télécharger le code
-    const downloadBtn = document.getElementById('download-code-btn');
-    if (downloadBtn) {
-        downloadBtn.addEventListener('click', () => {
-            if (!codeEditorInstance) return;
-            const code = codeEditorInstance.getValue();
-            const blob = new Blob([code], {type: "text/x-python"}); //
-            const url = URL.createObjectURL(blob); // Crée un objet URL pour le blob
-            const a = document.createElement('a'); // Crée un lien temporaire pour le téléchargement
-            a.href = url; 
-            const now = new Date();
-            const yyyy = now.getFullYear().toString(); // Année complète
-            const yy = yyyy[2] + yyyy[3]; // 2 derniers chiffres de l'année
-            const mm = String(now.getMonth() + 1).padStart(2, '0');
-            const dd = String(now.getDate()).padStart(2, '0');
-            a.download = `mon_code_${dd}${mm}${yy}.py`;
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 0);
-        });
-    }
-
-    // 3ème bouton: Ouvrir un fichier .PY ONLY
-    const openFileBtn = document.getElementById('open-file-btn');
-    const fileInput = document.getElementById('file-input');
-    if (openFileBtn && fileInput) {
-        openFileBtn.addEventListener('click', () => fileInput.click());
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file && file.name.endsWith('.py')) {
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    if (codeEditorInstance) {
-                        // Invalider l'état du diagramme actuel car un nouveau fichier est chargé
-                        lastDiagramAstDump = "";
-                        document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Nouveau fichier chargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
-                        resetChallengeInputs();
-                        document.getElementById('check-answers-btn').disabled = true;
-                        document.getElementById('show-solution-btn').disabled = true;
-                        
-                        codeEditorInstance.setValue(evt.target.result);
-                        lastLoadedCode = evt.target.result; // Mémorise ce code comme "dernier chargé"
-                        setDiagramAndChallengeCardState("default"); // Le nouvel état est "default", pas "outdated"
-                    }
-                };
-                reader.readAsText(file, "UTF-8");
-            } else {
-                alert("Choisissez un fichier .py UNIQUEMENT");
-            }
-            fileInput.value = ""; // Reset pour permettre de recharger le même fichier
-        });
-    }
-
-    // 4ème: Partager (ici: copier dans le presse-papier)
-    const shareBtn = document.getElementById('share-code-btn');
-    if (shareBtn) {
-        shareBtn.addEventListener('click', async () => {
-            if (!codeEditorInstance) return;
-            const code = codeEditorInstance.getValue();
-            try {
-                await navigator.clipboard.writeText(code);
-                shareBtn.classList.add('btn-success');
-                setTimeout(() => shareBtn.classList.remove('btn-success'), 1000);
-            } catch (err) {
-                alert("Impossible de copier dans le presse-papier.");
+    if (isAdvanced) {
+        advancedOpOptions.forEach(opt => {
+            if (!opOptionsDiv.querySelector(`#${opt.id}`)) { // Vérifie à l'intérieur du conteneur
+                opOptionsDiv.insertAdjacentHTML('beforeend', `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`);
             }
         });
-    }
-
-    // 5ème: Reload (restaurer le code après génération/chargement)
-    const reloadBtn = document.getElementById("reload-code-btn");
-    if (reloadBtn) {
-        reloadBtn.addEventListener('click', () => {
-            if (lastLoadedCode && codeEditorInstance) {
-                // 1. Invalider l'état du diagramme et du défi AVANT de changer le code.
-                //    Ceci est crucial pour que le listener 'change' ne voie pas un état incohérent.
-                lastDiagramAstDump = ""; // Le diagramme ne correspondra plus, il est donc invalidé.
-                document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Code rechargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
-                resetChallengeInputs();
-                document.getElementById('check-answers-btn').disabled = true;
-                document.getElementById('show-solution-btn').disabled = true;
-
-                // 2. Changer la valeur de l'éditeur.
-                //    Le listener 'change' va se déclencher ici.
-                codeEditorInstance.setValue(lastLoadedCode);
-                
-                // 3. Le listener 'change' verra que lastDiagramAstDump est vide et mettra l'état à "default".
-                //    L'appel explicite ici est une sécurité supplémentaire.
-                setDiagramAndChallengeCardState("default");
-                console.log("Code rechargé depuis la dernière sauvegarde. Diagramme invalidé.");
-            }
+    } else {
+        advancedOpOptions.forEach(opt => {
+            let el = opOptionsDiv.querySelector(`#${opt.id}`);
+            if (el && el.parentNode && el.parentNode.classList.contains('form-check')) el.parentNode.remove();
         });
     }
+}
 
-    // --- Mémoriser le code après génération ou chargement d'exemple ---
-    function memorizeLoadedCode(code) {
-        lastLoadedCode = code;
-    }
-
-    // Appelle memorizeLoadedCode(code) après chaque génération ou chargement d'exemple
-    // dans le gestionnaire du bouton "Générer un Code Aléatoire" :
-    const generateCodeButton = document.getElementById('generate-code-btn');
-    if (generateCodeButton) {
-        generateCodeButton.addEventListener('click', function() {
-            // La mémorisation se fait après la génération, dans le listener du bouton.
-            // On invalide aussi l'état du diagramme ici.
-            lastDiagramAstDump = "";
-            console.log("génération du code par ailleurs... on va mémoriser et invalider le diagramme");
-            if (codeEditorInstance) memorizeLoadedCode(codeEditorInstance.getValue());
+// Ajoute/Supprime les options avancées pour les Conditions (Ctrl)
+function addAdvancedConditionOptionsIfNeeded(container, isAdvancedModeActiveOverride = null) {
+    if (!container) return;
+    const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
+                       (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
+    // Options avancées pour les conditions (if imbriqués)
+    const advancedConditionOptions = [
+        { id: 'cond-if-if', label: 'if:_if:' },
+        { id: 'cond-if-if-if', label: 'if:_if:_if:' }
+    ];
+    if (isAdvanced) {
+        // console.log("Mode avancé pour Conditions: Ajout.");
+        advancedConditionOptions.forEach(opt => {
+            if (!container.querySelector(`#${opt.id}`)) container.insertAdjacentHTML('beforeend', `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`);
+        });
+    } else {
+        // console.log("Mode avancé pour Conditions: Suppression.");
+        advancedConditionOptions.forEach(opt => {
+            let el = container.querySelector(`#${opt.id}`);
+            if (el && el.parentNode && el.parentNode.classList.contains('form-check')) el.parentNode.remove();
         });
     }
-    // dans le gestionnaire de chargement d'exemple :
-    const predefinedExamplesList = document.getElementById('predefined-examples-list');
-    if (predefinedExamplesList) {
-        predefinedExamplesList.querySelectorAll('a[data-example-index]').forEach(link => {
-            link.addEventListener('click', function() {
-                // L'invalidation et la mémorisation sont gérées dans le listener de chaque lien d'exemple.
-                lastDiagramAstDump = "";
-                console.log("chargement du code par ailleurs... on va mémoriser et invalider le diagramme");
-                if (codeEditorInstance) memorizeLoadedCode(codeEditorInstance.getValue());
-            });
+}
+
+// Ajoute/Supprime les options avancées pour les Boucles (Loop)
+function addAdvancedLoopOptionsIfNeeded(container, isAdvancedModeActiveOverride = null) {
+    if (!container) return;
+    const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
+                       (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
+    // Options avancées pour les boucles (boucles imbriquées, while avec opérateur)
+    const advancedLoopOptions = [
+        { id: 'loop-nested-for2', label: 'for^2' },
+        { id: 'loop-nested-for3', label: 'for^3' },
+        { id: 'loop-while-op', label: 'while{op}' },
+        { id: 'loop-range-ab', label: 'range(a,b)'},
+        { id: 'loop-range-abs', label: 'range(a,b,s)'}
+    ];
+    // Anciennes options à s'assurer de supprimer si elles existent
+    const oldAdvancedLoopOptionIDs = ['loop-for-tuple', 'loop-continue'];
+    if (isAdvanced) {
+        // console.log("Mode avancé pour Boucles: Ajout.");
+        advancedLoopOptions.forEach(opt => {
+            if (!container.querySelector(`#${opt.id}`)) container.insertAdjacentHTML('beforeend', `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`);
         });
+        oldAdvancedLoopOptionIDs.forEach(idSuffix => { let el = container.querySelector(`#${idSuffix}`); if (el && el.parentNode) el.parentNode.remove(); });
+    } else {
+        // console.log("Mode avancé pour Boucles: Suppression.");
+        const allPossibleAdvancedLoopIDs = advancedLoopOptions.map(o => o.id).concat(oldAdvancedLoopOptionIDs);
+        allPossibleAdvancedLoopIDs.forEach(idSuffix => { let el = container.querySelector(`#${idSuffix}`); if (el && el.parentNode) el.parentNode.remove(); });
     }
-    
-    let variableValuesFromExecution = {}; // Pour stocker les valeurs des variables après l'exécution du code
+}
 
-    // --- Éléments DOM Globaux pour la Configuration ---
-    const difficultyGlobalSelect = document.getElementById('difficulty-level-global');
-    const numLinesGlobalSelect = document.getElementById('num-lines-global');
-    const numTotalVariablesGlobalSelect = document.getElementById('num-total-variables-global');
-    const advancedModeCheckbox = document.getElementById('advanced-mode');
-
-    // --- HTML Templates pour les options de syntaxe de BASE ---
-    // Ces templates sont utilisés pour injecter les options de base lorsque les cadres sont activés.
-    const conditionsOptionsHTML_Base = `
-        <div class="d-flex flex-column gap-1">
-            <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_simple" type="checkbox" id="cond-if"><label class="form-check-label small" for="cond-if">if:</label></div>
-            <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_else" data-ctrl-parent="cond-if" type="checkbox" id="cond-if-else"><label class="form-check-label small" for="cond-if-else">if:_else:</label></div>
-            <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_elif" data-ctrl-parent="cond-if" type="checkbox" id="cond-if-elif"><label class="form-check-label small" for="cond-if-elif">if:_elif:</label></div>
-            <div class="form-check form-check-inline"><input class="form-check-input ctrl-option" data-ctrl-type="if_elif_else" data-ctrl-parents="cond-if,cond-if-elif" type="checkbox" id="cond-if-elif-else"><label class="form-check-label small" for="cond-if-elif-else">elif:_else:</label></div>
-        </div>`;
-    const loopsOptionsHTML_Base = `
-        <div class="d-flex flex-column gap-1">
-            <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-for-range"><label class="form-check-label small" for="loop-for-range">for_range</label></div>
-            <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-for-list"><label class="form-check-label small" for="loop-for-list">for_List</label></div>
-            <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-for-str"><label class="form-check-label small" for="loop-for-str">for_Str</label></div>
-            <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="loop-while"><label class="form-check-label small" for="loop-while">while_</label></div>
-        </div>`;
-    const functionsOptionsHTML_Base = `
-        <div class="d-flex flex-column gap-1">
-            <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-a"><label class="form-check-label small" for="func-def-a">def f(a)</label></div>
-            <div class="form-check form-check-inline" id="func-builtins-main-container"></div>
-            <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-return"><label class="form-check-label small" for="func-return">return</label></div>
-        </div>`;
-
-    // --- Gestion du chargement des exemples prédéfinis ---
-     const loadPredefinedCodeBtn = document.getElementById('load-predefined-code-btn'); // Le bouton lui-même
-
-    if (predefinedExamplesList && typeof PREDEFINED_EXAMPLES !== 'undefined' && PREDEFINED_EXAMPLES.length > 0) {
-        PREDEFINED_EXAMPLES.forEach((example, index) => {
-            const listItem = document.createElement('li');
-            const link = document.createElement('a');
-            link.className = 'dropdown-item';
-            link.href = '#';
-            link.textContent = example.name;
-            link.dataset.exampleIndex = index; // Stocker l'index pour un accès facile
-
-            link.addEventListener('click', function(e) {
-                e.preventDefault();
-                const exampleIndex = parseInt(this.dataset.exampleIndex);
-                const selectedExample = PREDEFINED_EXAMPLES[exampleIndex];
-                if (selectedExample && codeEditorInstance) {
-                    // Invalider l'état du diagramme actuel car un nouvel exemple est chargé
-                    lastDiagramAstDump = "";
-                    
-                    codeEditorInstance.setValue(selectedExample.code);
-                    memorizeLoadedCode(selectedExample.code);
-                    
-                    setDiagramAndChallengeCardState("default");
-                    console.log(`Exemple chargé et mémorisé: ${selectedExample.name}. Diagramme invalidé.`);
-                    
-                    resetChallengeInputs();
-                    document.getElementById('check-answers-btn').disabled = true;
-                    document.getElementById('show-solution-btn').disabled = true;
-                    document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Code chargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
-                }
-            });
-
-            listItem.appendChild(link);
-            predefinedExamplesList.appendChild(listItem);
-        });
-    } else if (loadPredefinedCodeBtn) {
-        // S'il n'y a pas d'exemples, on peut désactiver le bouton ou afficher un message
-        loadPredefinedCodeBtn.disabled = true;
-        const noExamplesItem = document.createElement('li');
-        noExamplesItem.innerHTML = '<span class="dropdown-item disabled">Aucun exemple disponible</span>';
-        if (predefinedExamplesList) predefinedExamplesList.appendChild(noExamplesItem);
-        console.warn("PREDEFINED_EXAMPLES n'est pas défini ou est vide. Le chargement d'exemples est désactivé.");
-    }
-        
-    // --- Fonctions Utilitaires ---
-    function populateSelectWithOptions(selectElement, min, max, currentSelectedVal) {
-        if (!selectElement) return;
-        const previousValue = parseInt(selectElement.value);
-        selectElement.innerHTML = '';
-        for (let i = min; i <= max; i++) {
-            const option = new Option(i, i); // text, value
-            selectElement.add(option);
-        }
-        if (!isNaN(currentSelectedVal) && currentSelectedVal >= min && currentSelectedVal <= max) {
-            selectElement.value = currentSelectedVal;
-        } else if (!isNaN(previousValue) && previousValue >= min && previousValue <= max) {
-            selectElement.value = previousValue;
-        } else {
-            selectElement.value = min;
-        }
-    }
-
-    // --- Initialisation et gestion des options de syntaxe dynamiques (Ctrl, Loop, Func) ---
-    function initializeDynamicSyntaxOptions() {
-        console.log("Initialisation des options dynamiques des cadres de syntaxe...");
-        const syntaxSectionsConfig = [
-            { checkboxId: 'frame-conditions', containerId: 'conditions-options-container', baseHtmlGetter: () => conditionsOptionsHTML_Base, advancedHandler: addAdvancedConditionOptionsIfNeeded, specialSetup: setupConditionalParenting },
-            { checkboxId: 'frame-loops', containerId: 'loops-options-container', baseHtmlGetter: () => loopsOptionsHTML_Base, advancedHandler: addAdvancedLoopOptionsIfNeeded },
-            { checkboxId: 'frame-functions', containerId: 'functions-options-container', baseHtmlGetter: () => functionsOptionsHTML_Base, advancedHandler: addAdvancedFunctionOptionsIfNeeded, specialSetup: setupFunctionOptionsExtras }
-        ];
-
-        syntaxSectionsConfig.forEach(section => {
-            const checkbox = document.getElementById(section.checkboxId);
-            const targetContainer = document.getElementById(section.containerId);
-
-            if (!checkbox || !targetContainer) {
-                console.error(`Éléments manquants pour la section ${section.checkboxId}. IDs: ${section.checkboxId}, ${section.containerId}`);
-                return;
-            }
-
-            const updateDOM = () => {
-                if (checkbox.checked) {
-                    targetContainer.innerHTML = section.baseHtmlGetter();
-                    const internalContainer = targetContainer.querySelector('.d-flex.flex-column.gap-1');
-                    if (internalContainer && section.advancedHandler) {
-                        section.advancedHandler(internalContainer, advancedModeCheckbox.checked);
-                    }
-                    if (section.specialSetup) { // Appel des configurations spécifiques
-                        section.specialSetup(internalContainer);
-                    }
+// Ajoute/Supprime les options avancées pour les Fonctions (Func)
+function addAdvancedFunctionOptionsIfNeeded(container, isAdvancedModeActiveOverride = null) {
+    if (!container) return;
+    const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
+                       (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
+    // Les options avancées de fonction (hors builtins)
+    const advancedFunctionOptions = [
+        { id: 'func-def-ab', label: 'def f(a,b)' },
+        { id: 'func-op-list', label: 'opList' },
+        { id: 'func-op-str', label: 'opStr' }
+    ];
+    advancedFunctionOptions.forEach(opt => {
+        let existingOption = container.querySelector(`#${opt.id}`);
+        if (isAdvanced) {
+            if (!existingOption) {
+                const builtinsMainContainer = container.querySelector('#func-builtins-main-container');
+                const injectionHTML = `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`;
+                if (builtinsMainContainer) {
+                    builtinsMainContainer.insertAdjacentHTML('beforebegin', injectionHTML);
                 } else {
-                    targetContainer.innerHTML = '';
+                    container.insertAdjacentHTML('beforeend', injectionHTML);
                 }
-                updateGlobalConfigSelectors();
-            };
-
-            checkbox.removeEventListener('change', updateDOM);
-            checkbox.addEventListener('change', updateDOM);
-            updateDOM(); // Appel initial pour définir l'état
-        });
-        console.log("Options dynamiques des cadres de syntaxe initialisées.");
-    }
-    
-    // Configuration spécifique après injection des options de fonctions (pour builtins)
-    function setupFunctionOptionsExtras(funcOptionsContainer) {
-        if (!funcOptionsContainer) return;
-        const builtinsMainContainer = funcOptionsContainer.querySelector('#func-builtins-main-container');
-        if (builtinsMainContainer) {
-            createBuiltinsMainCheckbox(builtinsMainContainer);
-        }
-    }
-    
-    initializeDynamicSyntaxOptions(); // Appel PRINCIPAL pour initialiser Ctrl, Loop, Func
-
-    // --- Gestion des sélecteurs de nombre de variables par type ---
-    const varTypeCheckboxes = document.querySelectorAll('.var-type-checkbox');
-    varTypeCheckboxes.forEach(checkbox => {
-        const varType = checkbox.id.replace('var-', '');
-        const targetSelectId = checkbox.dataset.targetSelect;
-        if (targetSelectId && VAR_COUNT_LIMITS[varType]) {
-            const selectElement = document.getElementById(targetSelectId);
-            const limits = VAR_COUNT_LIMITS[varType];
-            if (selectElement) {
-                populateSelectWithOptions(selectElement, limits.min, limits.max, limits.min);
-                const updateVarCountSelectVisibility = () => {
-                    selectElement.style.display = checkbox.checked ? 'inline-block' : 'none';
-                    if (!checkbox.checked) selectElement.value = limits.min;
-                    updateGlobalConfigSelectors();
-                    handleVisualInterdependencies();
-                };
-                checkbox.removeEventListener('change', updateVarCountSelectVisibility); // Eviter doublons
-                checkbox.addEventListener('change', updateVarCountSelectVisibility);
-                updateVarCountSelectVisibility(); // Etat initial
+            }
+        } else {
+            if (existingOption && existingOption.parentElement && existingOption.parentElement.classList.contains('form-check')) {
+                existingOption.parentElement.remove();
             }
         }
     });
+}
 
-    // --- Logique de parenté pour les options de Conditions (Ctrl) ---
-    function setupConditionalParenting(container) {
-        if (!container) return;
-        const ifSimple = container.querySelector('#cond-if'); const ifElse = container.querySelector('#cond-if-else');
-        const ifElif = container.querySelector('#cond-if-elif'); const ifElifElse = container.querySelector('#cond-if-elif-else');
-        const allCtrlOptions = [ifSimple, ifElse, ifElif, ifElifElse];
 
-        allCtrlOptions.forEach(opt => { // Ajouter listener générique pour updateGlobalConfig
-            if(opt) opt.addEventListener('change', () => {
-                setTimeout(updateGlobalConfigSelectors,0); // setTimeout pour ordre d'execution
-                setTimeout(handleVisualInterdependencies,0);
-            });
+/**
+ * Configure la logique de dépendance entre les options de conditions
+ * (if, if/else, if/elif, if/elif/else)
+ * @param {HTMLElement} container - Le conteneur des options de conditions
+ */
+function setupConditionalParenting(container) {
+    if (!container) return;
+    const ifSimple = container.querySelector('#cond-if'); 
+    const ifElse = container.querySelector('#cond-if-else');
+    const ifElif = container.querySelector('#cond-if-elif'); 
+    const ifElifElse = container.querySelector('#cond-if-elif-else');
+    
+    const allCtrlOptions = [ifSimple, ifElse, ifElif, ifElifElse];
+    
+    // Mettre à jour les minimums requis quand une option change
+    allCtrlOptions.forEach(opt => {
+        if(opt) opt.addEventListener('change', () => {
+            setTimeout(updateGlobalConfigSelectors,0);
+            setTimeout(handleVisualInterdependencies,0);
         });
-
-        [ifElse, ifElif, ifElifElse].forEach(child => {
-            if (child) child.addEventListener('change', () => { if (child.checked) { if (ifSimple) ifSimple.checked = true; if (child === ifElifElse && ifElif) ifElif.checked = true; }});
+    });
+    
+    // Gérer les dépendances parent/enfant
+    [ifElse, ifElif, ifElifElse].forEach(child => {
+        if (child) child.addEventListener('change', () => { 
+            if (child.checked) { 
+                if (ifSimple) ifSimple.checked = true; 
+                if (child === ifElifElse && ifElif) ifElif.checked = true; 
+            }
         });
-        if (ifSimple) ifSimple.addEventListener('change', () => { if (!ifSimple.checked) { if (ifElse) ifElse.checked = false; if (ifElif) ifElif.checked = false; if (ifElifElse) ifElifElse.checked = false; }});
-        if (ifElif) ifElif.addEventListener('change', () => { if (!ifElif.checked) { if (ifElifElse) ifElifElse.checked = false; }});
+    });
+    
+    // Si on désactive le parent, désactiver tous les enfants
+    if (ifSimple) ifSimple.addEventListener('change', () => { 
+        if (!ifSimple.checked) { 
+            if (ifElse) ifElse.checked = false; 
+            if (ifElif) ifElif.checked = false; 
+            if (ifElifElse) ifElifElse.checked = false; 
+        }
+    });
+    
+    // Si on désactive if/elif, désactiver if/elif/else
+    if (ifElif) ifElif.addEventListener('change', () => { 
+        if (!ifElif.checked) { 
+            if (ifElifElse) ifElifElse.checked = false; 
+        }
+    });
+}
+
+/**
+ * Remplit un élément select avec des options de min à max, et sélectionne valueToSelect.
+ * @param {HTMLSelectElement} selectElement - L'élément select à remplir.
+ * @param {number} min - La valeur minimale.
+ * @param {number} max - La valeur maximale.
+ * @param {number} valueToSelect - La valeur à sélectionner.
+ */
+function populateSelectWithOptions(selectElement, min, max, valueToSelect) {
+    if (!selectElement) return;
+    const targetValue = valueToSelect;
+    const previousValue = selectElement.value;
+    selectElement.innerHTML = '';
+    for (let i = min; i <= max; i++) {
+        const option = new Option(i, i);
+        selectElement.add(option);
+    }
+    if (targetValue >= min && targetValue <= max) {
+        selectElement.value = targetValue;
+    } else {
+        selectElement.value = min;
+    }
+    if (previousValue !== selectElement.value) {
+        const label = selectElement.closest('.form-group')?.querySelector('label');
+        if (label) {
+            const originalColor = label.style.color;
+            label.style.transition = "color 0.5s ease";
+            label.style.color = "#0d6efd";
+            setTimeout(() => {
+                label.style.color = originalColor;
+                setTimeout(() => {
+                    label.style.transition = "";
+                }, 500);
+            }, 2000);
+        }
+    }
+}
+
+// --- Fonction d'initialisation et d'exécution ---
+function initializeUI() {
+    // 1. Définir et charger le code Python par défaut dans l'éditeur.
+    const defaultPythonCode =
+`# Code Python d'exemple
+# Modifiez-le ou générez un nouveau code.
+x = 5
+y = 10
+if x > y:
+    result = "x est plus grand"
+else:
+    result = "y est plus grand ou égal"
+z = x + y`;
+
+    if (codeEditorInstance) {
+        codeEditorInstance.setValue(defaultPythonCode);
+        memorizeLoadedCode(defaultPythonCode); // Mémoriser ce code comme "dernier état connu"
     }
 
-    // --- Gestion spécifique des options de Builtins ---
-    function createBuiltinsMainCheckbox(parentContainer) {
-        if (!parentContainer) return;
-        parentContainer.innerHTML = '';
-        const input = document.createElement('input'); input.className = 'form-check-input'; input.type = 'checkbox'; input.id = 'func-builtins';
-        const label = document.createElement('label'); label.className = 'form-check-label small'; label.htmlFor = 'func-builtins'; label.textContent = 'builtins';
-        const builtinsOptionsWrapper = document.createElement('div'); builtinsOptionsWrapper.id = 'func-builtins-options-wrapper';
-        builtinsOptionsWrapper.className = 'mt-1'; builtinsOptionsWrapper.style.display = 'none';
-        parentContainer.appendChild(input); parentContainer.appendChild(label);
-        if (parentContainer.parentElement) parentContainer.parentElement.insertBefore(builtinsOptionsWrapper, parentContainer.nextSibling);
-        input.addEventListener('change', toggleBuiltinOptionsVisibility);
-        if (input.checked) toggleBuiltinOptionsVisibility({ target: input });
+    // 2. Afficher les messages d'accueil dans les cartes "Diagramme" et "Défi".
+    const flowchartDisplayArea = document.getElementById('flowchart');
+    if (flowchartDisplayArea) {
+        flowchartDisplayArea.innerHTML = '<p class="text-center text-muted mt-3">Cliquez sur "Lancer le diagramme et les défis" pour générer le diagramme de flux.</p>';
     }
-    function toggleBuiltinOptionsVisibility(event) {
+
+    // 3. Appel à la fonction de validation.js pour réinitialiser la section défi.
+    if (typeof resetChallengeInputs === 'function') {
+        resetChallengeInputs(challengeVariablesContainer);
+    } else {
+        // Fallback vers la fonction interne si validation.js n'est pas chargé
+        const container = document.getElementById('variables-container');
+        if (container) {
+            container.innerHTML = `
+                <div class="col-12 text-center text-muted">
+                    <p><i class="fas fa-code me-2"></i>Lancer le diagramme et les défis pour voir les variables...</p>
+                </div>`;
+        }
+    }
+
+    // 4. Désactiver les boutons du défi, car aucun code n'a encore été exécuté.
+    if (checkAnswersButton) checkAnswersButton.disabled = true;
+    if (showSolutionButton) showSolutionButton.disabled = true;
+
+    // 5. Mettre les cartes dans leur état visuel par défaut (bordure bleue/info).
+    setDiagramAndChallengeCardState("default");
+}
+
+// --- Initialisation et gestion des options de syntaxe dynamiques (Ctrl, Loop, Func) ---
+function initializeDynamicSyntaxOptions() {
+    // console.log("Initialisation des options dynamiques des cadres de syntaxe...");
+    // Vérifier que l'élément critique existe
+    if (!advancedModeCheckbox) {
+        console.warn("advancedModeCheckbox non disponible - initializeDynamicSyntaxOptions reporté");
+        return;
+    }
+
+    const syntaxSectionsConfig = [
+        { checkboxId: 'frame-conditions', containerId: 'conditions-options-container', baseHtmlGetter: () => conditionsOptionsHTML_Base, advancedHandler: addAdvancedConditionOptionsIfNeeded, specialSetup: setupConditionalParenting },
+        { checkboxId: 'frame-loops', containerId: 'loops-options-container', baseHtmlGetter: () => loopsOptionsHTML_Base, advancedHandler: addAdvancedLoopOptionsIfNeeded },
+        { checkboxId: 'frame-functions', containerId: 'functions-options-container', baseHtmlGetter: () => functionsOptionsHTML_Base, advancedHandler: addAdvancedFunctionOptionsIfNeeded, specialSetup: setupFunctionOptionsExtras }
+    ];
+
+    syntaxSectionsConfig.forEach(section => {
+        const checkbox = document.getElementById(section.checkboxId);
+        const targetContainer = document.getElementById(section.containerId);
+
+        if (!checkbox || !targetContainer) {
+            console.error(`Éléments manquants pour la section ${section.checkboxId}. IDs: ${section.checkboxId}, ${section.containerId}`);
+            return;
+        }
+
+        const updateDOM = () => {
+            if (checkbox.checked) {
+                targetContainer.innerHTML = section.baseHtmlGetter();
+                //  Logique pour cocher l'option de base par défaut
+                if (section.checkboxId === 'frame-conditions') {
+                    const ifCheckbox = targetContainer.querySelector('#cond-if');
+                    if (ifCheckbox) ifCheckbox.checked = true;
+                } else if (section.checkboxId === 'frame-functions') {
+                    const funcSimpleCheckbox = targetContainer.querySelector('#func-def-simple');
+                    if (funcSimpleCheckbox) funcSimpleCheckbox.checked = true;
+                }
+                const internalContainer = targetContainer.querySelector('.d-flex.flex-column.gap-1');
+                if (internalContainer && section.advancedHandler) {
+                    section.advancedHandler(internalContainer, advancedModeCheckbox.checked);
+                }
+                if (section.specialSetup) { // Appel des configurations spécifiques
+                    section.specialSetup(internalContainer);
+                }
+            } else {
+                targetContainer.innerHTML = '';
+            }
+            updateGlobalConfigSelectors();
+        };
+
+        checkbox.removeEventListener('change', updateDOM);
+        checkbox.addEventListener('change', updateDOM);
+        updateDOM(); // Appel initial pour définir l'état
+    });
+    console.log("Options dynamiques des cadres de syntaxe initialisées.");
+}
+
+/**
+ * Crée la case à cocher principale pour les fonctions builtin et son conteneur.
+ * @param {HTMLElement} parentContainer - L'élément où ajouter la case à cocher.
+ */
+function createBuiltinsMainCheckbox(parentContainer) {
+    if (!parentContainer) return;
+    parentContainer.innerHTML = '';
+    const input = document.createElement('input'); input.className = 'form-check-input'; input.type = 'checkbox'; input.id = 'func-builtins';
+    const label = document.createElement('label'); label.className = 'form-check-label small'; label.htmlFor = 'func-builtins'; label.textContent = 'builtins';
+    const builtinsOptionsWrapper = document.createElement('div'); builtinsOptionsWrapper.id = 'func-builtins-options-wrapper';
+    builtinsOptionsWrapper.className = 'mt-1'; builtinsOptionsWrapper.style.display = 'none';
+    parentContainer.appendChild(input); parentContainer.appendChild(label);
+    if (parentContainer.parentElement) parentContainer.parentElement.insertBefore(builtinsOptionsWrapper, parentContainer.nextSibling);
+    input.addEventListener('change', toggleBuiltinOptionsVisibility);
+    if (input.checked) toggleBuiltinOptionsVisibility({ target: input });
+}
+
+/**
+ * Gère la visibilité des options de fonctions builtin en fonction de l'état de la case à cocher.
+ * @param {Event} event - L'événement de changement de la case à cocher
+ * */
+function toggleBuiltinOptionsVisibility(event) {
         const builtinsCheckbox = event.target;
         const builtinsOptionsWrapper = document.getElementById('func-builtins-options-wrapper');
         if (!builtinsOptionsWrapper) return;
@@ -408,567 +428,197 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         updateGlobalConfigSelectors(); handleVisualInterdependencies();
     }
-    function populateBuiltinOptionsColumns(wrapper) {
-        wrapper.innerHTML = ''; const isAdvanced = advancedModeCheckbox.checked;
-        const rowDiv = document.createElement('div'); rowDiv.className = 'row gx-2 gy-1';
-        const colBaseDiv = document.createElement('div'); colBaseDiv.className = 'col-auto';
-        const colAdvancedDiv = document.createElement('div'); colAdvancedDiv.className = 'col-auto';
-        const createBuiltinCheckboxList = (builtinsArray) => {
-            const listContainer = document.createElement('div'); listContainer.className = 'd-flex flex-column align-items-start gap-1';
-            builtinsArray.forEach(builtin => {
-                const div = document.createElement('div'); div.className = 'form-check';
-                const input = document.createElement('input'); input.className = 'form-check-input builtin-option-checkbox'; input.type = 'checkbox'; input.id = builtin.id; input.value = builtin.id;
-                const currentlyCheckedState = document.getElementById(builtin.id)?.checked; if(currentlyCheckedState) input.checked = true;
-                const label = document.createElement('label'); label.className = 'form-check-label small'; label.htmlFor = builtin.id; label.textContent = builtin.label;
-                input.addEventListener('change', () => { updateGlobalConfigSelectors(); handleVisualInterdependencies(); });
-                div.appendChild(input); div.appendChild(label); listContainer.appendChild(div);
-            }); return listContainer;
-        };
-        colBaseDiv.appendChild(createBuiltinCheckboxList(BUILTINS_BASE)); rowDiv.appendChild(colBaseDiv);
-        if (isAdvanced && BUILTINS_ADVANCED.length > 0) { colAdvancedDiv.appendChild(createBuiltinCheckboxList(BUILTINS_ADVANCED)); rowDiv.appendChild(colAdvancedDiv); }
-        wrapper.appendChild(rowDiv);
+
+/**
+ * Remplit le conteneur des options de fonctions builtin avec les cases à cocher appropriées.
+ * @param {HTMLElement} wrapper - Le conteneur où ajouter les options.
+ */
+function populateBuiltinOptionsColumns(wrapper) {
+    wrapper.innerHTML = ''; const isAdvanced = advancedModeCheckbox.checked;
+    const rowDiv = document.createElement('div'); rowDiv.className = 'row gx-2 gy-1';
+    const colBaseDiv = document.createElement('div'); colBaseDiv.className = 'col-auto';
+    const colAdvancedDiv = document.createElement('div'); colAdvancedDiv.className = 'col-auto';
+    const createBuiltinCheckboxList = (builtinsArray) => {
+        const listContainer = document.createElement('div'); listContainer.className = 'd-flex flex-column align-items-start gap-1';
+        builtinsArray.forEach(builtin => {
+            const div = document.createElement('div'); div.className = 'form-check';
+            const input = document.createElement('input'); input.className = 'form-check-input builtin-option-checkbox'; input.type = 'checkbox'; input.id = builtin.id; input.value = builtin.id;
+            const currentlyCheckedState = document.getElementById(builtin.id)?.checked; if(currentlyCheckedState) input.checked = true;
+            const label = document.createElement('label'); label.className = 'form-check-label small'; label.htmlFor = builtin.id; label.textContent = builtin.label;
+            input.addEventListener('change', () => { updateGlobalConfigSelectors(); handleVisualInterdependencies(); });
+            div.appendChild(input); div.appendChild(label); listContainer.appendChild(div);
+        }); return listContainer;
+    };
+    colBaseDiv.appendChild(createBuiltinCheckboxList(BUILTINS_BASE)); rowDiv.appendChild(colBaseDiv);
+    if (isAdvanced && BUILTINS_ADVANCED.length > 0) { colAdvancedDiv.appendChild(createBuiltinCheckboxList(BUILTINS_ADVANCED)); rowDiv.appendChild(colAdvancedDiv); }
+    wrapper.appendChild(rowDiv);
+}
+
+/**
+ * // Configuration spécifique après injection des options de fonctions (pour builtins
+ * @param {HTMLElement} funcOptionsContainer - Le conteneur des options de fonctions.
+ */
+function setupFunctionOptionsExtras(funcOptionsContainer) {
+    if (!funcOptionsContainer) return;
+    const builtinsMainContainer = funcOptionsContainer.querySelector('#func-builtins-main-container');
+    if (builtinsMainContainer) {
+        createBuiltinsMainCheckbox(builtinsMainContainer);
     }
+}
 
-    // --- Gestionnaire pour le "Mode avancé" ---
-    if (advancedModeCheckbox) {
-        advancedModeCheckbox.addEventListener('change', function() {
-            const isAdvanced = this.checked;
-            addAdvancedOperationOptionsIfNeeded(isAdvanced);
-            const condContainer = document.querySelector('#conditions-options-container > .d-flex.flex-column.gap-1'); if (condContainer) addAdvancedConditionOptionsIfNeeded(condContainer, isAdvanced);
-            const loopContainer = document.querySelector('#loops-options-container > .d-flex.flex-column.gap-1'); if (loopContainer) addAdvancedLoopOptionsIfNeeded(loopContainer, isAdvanced);
-            const funcBaseOptsContainer = document.querySelector('#functions-options-container > .d-flex.flex-column.gap-1'); if (funcBaseOptsContainer) addAdvancedFunctionOptionsIfNeeded(funcBaseOptsContainer, isAdvanced); // Gère les options avancées de func HORS builtins
-            const funcBuiltinsCheckbox = document.getElementById('func-builtins'); const builtinsOptionsWrapper = document.getElementById('func-builtins-options-wrapper');
-            if (funcBuiltinsCheckbox && funcBuiltinsCheckbox.checked && builtinsOptionsWrapper) populateBuiltinOptionsColumns(builtinsOptionsWrapper); // Repeuple les builtins
-            updateGlobalConfigSelectors(); handleVisualInterdependencies();
-        });
+/**
+ * Calcule les exigences minimales en termes de lignes de code et de variables 
+ * en fonction des options de syntaxe sélectionnées.
+ * @returns {Object} Un objet contenant les minimums requis pour les lignes et les variables.
+ */
+function calculateGlobalRequirements() {
+    let minTotalLines = MIN_POSSIBLE_CODE_LINES;
+    let minTotalVariables = 0;
+    let conceptualDifficultyScore = 0;
+    const getChecked = (id) => document.getElementById(id)?.checked || false;
+    const getVarCount = (type) => {
+        const checkbox = document.getElementById(`var-${type}`);
+        const select = document.getElementById(`var-${type}-count`);
+        return (checkbox?.checked && select && select.style.display !== 'none') ? parseInt(select.value) : 0;
+    };
+    let varCounts = { int: getVarCount('int'), float: getVarCount('float'), str: getVarCount('str'), list: getVarCount('list'), bool: getVarCount('bool') };
+    let explicitVarDeclarations = Object.values(varCounts).reduce((sum, count) => sum + count, 0);
+    minTotalVariables = Math.max(MIN_POSSIBLE_TOTAL_VARIABLES_GLOBAL, explicitVarDeclarations);
+    minTotalLines = Math.max(minTotalLines, explicitVarDeclarations);
+    if (getChecked('frame-loops')) {
+        if (getChecked('loop-for-range')) { minTotalLines += 2; minTotalVariables += 1; }
+        if (getChecked('loop-for-list')) { minTotalLines += 2; minTotalVariables += (varCounts.list === 0) ? 2 : 1; }
+        if (getChecked('loop-for-str')) { minTotalLines += 2; minTotalVariables += (varCounts.str === 0) ? 2 : 1; }
+        if (getChecked('loop-while')) { minTotalLines += 3; minTotalVariables += 1; }
     }
+    if (getChecked('frame-conditions') && getChecked('cond-if')) { minTotalLines += 2; minTotalVariables = Math.max(minTotalVariables, 1); }
+    // Simplification pour la lisibilité, la logique complète reste la même.
 
-    // --- Fonctions pour ajouter/supprimer les options AVANCÉES ---
+    minTotalLines = Math.min(Math.max(minTotalLines, MIN_POSSIBLE_CODE_LINES), MAX_CODE_LINES);
+    minTotalVariables = Math.min(Math.max(minTotalVariables, MIN_POSSIBLE_TOTAL_VARIABLES_GLOBAL), MAX_TOTAL_VARIABLES_GLOBAL);
 
-    // Gère les options avancées pour le cadre "Op" (opérateurs logiques, slicing)
-    function addAdvancedOperationOptionsIfNeeded(isAdvancedModeActiveOverride = null) {
-        const opOptionsDiv = document.getElementById('operations-options');
-        if (!opOptionsDiv) return;
-        const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
-                           (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
-        const advancedOpOptions = [
-            { id: 'op-and', label: 'and' }, { id: 'op-or', label: 'or' }, { id: 'op-not', label: 'not' },
-            { id: 'op-slice-ab', label: '[:]' }, // Slicing simple [a:b]
-            { id: 'op-slice-abs', label: '[::]' } // Slicing avec step [a:b:s]
-        ];
-
-        if (isAdvanced) {
-            advancedOpOptions.forEach(opt => {
-                if (!opOptionsDiv.querySelector(`#${opt.id}`)) { // Vérifie à l'intérieur du conteneur
-                    opOptionsDiv.insertAdjacentHTML('beforeend', `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`);
-                }
-            });
-        } else {
-            advancedOpOptions.forEach(opt => {
-                let el = opOptionsDiv.querySelector(`#${opt.id}`);
-                if (el && el.parentNode && el.parentNode.classList.contains('form-check')) el.parentNode.remove();
-            });
-        }
-    }
-
-    // Ajoute/Supprime les options avancées pour les Conditions (Ctrl)
-    function addAdvancedConditionOptionsIfNeeded(container, isAdvancedModeActiveOverride = null) {
-        if (!container) return;
-        const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
-                           (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
-        // Options avancées pour les conditions (if imbriqués)
-        const advancedConditionOptions = [
-            { id: 'cond-if-if', label: 'if:_if:' },
-            { id: 'cond-if-if-if', label: 'if:_if:_if:' }
-        ];
-        if (isAdvanced) {
-            // console.log("Mode avancé pour Conditions: Ajout.");
-            advancedConditionOptions.forEach(opt => {
-                if (!container.querySelector(`#${opt.id}`)) container.insertAdjacentHTML('beforeend', `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`);
-            });
-        } else {
-            // console.log("Mode avancé pour Conditions: Suppression.");
-            advancedConditionOptions.forEach(opt => {
-                let el = container.querySelector(`#${opt.id}`);
-                if (el && el.parentNode && el.parentNode.classList.contains('form-check')) el.parentNode.remove();
-            });
-        }
-    }
+    return { minLines: minTotalLines, minVariables: minTotalVariables };
+}
     
-    // Ajoute/Supprime les options avancées pour les Boucles (Loop)
-    function addAdvancedLoopOptionsIfNeeded(container, isAdvancedModeActiveOverride = null) {
-        if (!container) return;
-        const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
-                           (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
-        // Options avancées pour les boucles (boucles imbriquées, while avec opérateur)
-        const advancedLoopOptions = [
-            { id: 'loop-nested-for2', label: 'for^2' },
-            { id: 'loop-nested-for3', label: 'for^3' },
-            { id: 'loop-while-op', label: 'while{op}' },
-            { id: 'loop-range-ab', label: 'range(a,b)'},   
-            { id: 'loop-range-abs', label: 'range(a,b,s)'}
-        ];
-        // Anciennes options à s'assurer de supprimer si elles existent
-        const oldAdvancedLoopOptionIDs = ['loop-for-tuple', 'loop-continue'];
-        if (isAdvanced) {
-            // console.log("Mode avancé pour Boucles: Ajout.");
-            advancedLoopOptions.forEach(opt => {
-                if (!container.querySelector(`#${opt.id}`)) container.insertAdjacentHTML('beforeend', `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`);
-            });
-            oldAdvancedLoopOptionIDs.forEach(idSuffix => { let el = container.querySelector(`#${idSuffix}`); if (el && el.parentNode) el.parentNode.remove(); });
-        } else {
-            // console.log("Mode avancé pour Boucles: Suppression.");
-            const allPossibleAdvancedLoopIDs = advancedLoopOptions.map(o => o.id).concat(oldAdvancedLoopOptionIDs);
-            allPossibleAdvancedLoopIDs.forEach(idSuffix => { let el = container.querySelector(`#${idSuffix}`); if (el && el.parentNode) el.parentNode.remove(); });
-        }
+/**
+ * Met à jour les options des menus déroulants pour "Longueur du Code" et "Nombre de variables"
+ * en fonction des minimums calculés.
+ */
+function updateGlobalConfigSelectors() {
+    // Vérifier que les éléments sont disponibles
+    if (!numLinesGlobalSelect || !numTotalVariablesGlobalSelect) {
+        console.warn("Sélecteurs globaux non encore initialisés");
+        return;
     }
 
-    // Ajoute/Supprime les options avancées pour les Fonctions (Func)
-    // addAdvancedFunctionOptionsIfNeeded ne doit plus s'occuper de la checkbox builtins elle-même,
-    // mais des autres options avancées de fonctions.
-    function addAdvancedFunctionOptionsIfNeeded(container, isAdvancedModeActiveOverride = null) {
-        if (!container) return;
-        const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
-                           (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
-        // Les options avancées de fonction (hors builtins, qui sont gérés par populateBuiltinOptionsColumns)
-        const advancedFunctionOptions = [
-            { id: 'func-def-ab', label: 'def f(a,b)' },
-            { id: 'func-op-list', label: 'opList' },
-            { id: 'func-op-str', label: 'opStr' }
-        ];
-        advancedFunctionOptions.forEach(opt => {
-            let existingOption = container.querySelector(`#${opt.id}`);
-            if (isAdvanced) {
-                if (!existingOption) {
-                    // Injecter avant le conteneur de la checkbox builtins si possible, ou à la fin.
-                    const builtinsMainContainer = container.querySelector('#func-builtins-main-container');
-                    const injectionHTML = `<div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="${opt.id}"><label class="form-check-label small" for="${opt.id}">${opt.label}</label></div>`;
-                    if (builtinsMainContainer) {
-                        builtinsMainContainer.insertAdjacentHTML('beforebegin', injectionHTML);
-                    } else {
-                        container.insertAdjacentHTML('beforeend', injectionHTML);
-                    }
-                }
+    const { minLines, minVariables } = calculateGlobalRequirements();
+
+    // choisi de toujours utiliser minLines et minVariables à la place => variables devenu obsolètes
+    // const currentNumLinesVal = numLinesGlobalSelect ? parseInt(numLinesGlobalSelect.value) : minLines;
+    // const currentNumTotalVariablesVal = numTotalVariablesGlobalSelect ? parseInt(numTotalVariablesGlobalSelect.value) : minVariables;
+
+    // Mettre à jour le nombre de lignes disponibles, avec minLines comme minimum
+    populateSelectWithOptions(numLinesGlobalSelect, minLines, MAX_CODE_LINES, minLines);
+        // Si la valeur actuelle est inférieure au nouveau minimum, utiliser le minimum
+        // Math.max(currentNumLinesVal, minLines));
+
+    // Même chose pour le nombre de variables
+    populateSelectWithOptions(numTotalVariablesGlobalSelect, minVariables, MAX_TOTAL_VARIABLES_GLOBAL, minVariables);
+            // Math.max(currentNumTotalVariablesVal, minVariables));
+}
+
+// --- Gestion des interdépendances visuelles (ÉBAUCHE) ---
+// Cette fonction gère les suggestions visuelles basées sur les options sélectionnées.
+// Elle est appelée après chaque changement de syntaxe ou du mode avancé.
+function handleVisualInterdependencies() {
+    const getChecked = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
+    // Fonction pour récupérer le compte d'une variable type si sa checkbox est cochée
+    const getVarCount = (type) => {
+        const checkbox = document.getElementById(`var-${type}`);
+        const select = document.getElementById(`var-${type}-count`);
+        if (checkbox && checkbox.checked && select && select.style.display !== 'none') {
+            return parseInt(select.value);
+        }
+        return 0;
+    };
+
+    // Classe CSS pour le surlignage des suggestions
+    const highlightClassContainer = 'suggestion-highlight-container';
+    const highlightClassSelect = 'suggestion-highlight-select';
+
+    // Fonction utilitaire pour ajouter/retirer la classe de surlignage au parent (.form-check.form-check-inline)
+    const toggleHighlight = (elementId, condition) => {
+        const element = document.getElementById(elementId);
+        if (element && element.parentElement && element.parentElement.classList.contains('form-check')) { // Cible le div.form-check parent
+            if (condition) {
+                element.parentElement.classList.add(highlightClassContainer);
             } else {
-                if (existingOption && existingOption.parentElement && existingOption.parentElement.classList.contains('form-check')) {
-                    existingOption.parentElement.remove();
-                }
+                element.parentElement.classList.remove(highlightClassContainer);
             }
-        });
-    }
-
-
-      /**
-     * Calcule les minimums pour lignes/variables 
-     * RETIRÉ : LE score de difficulté conceptuelle.
-     * @returns {object} { minLines: number, minVariables: number}
-     */
-     /**
-     * Calcule les totaux de variables, lignes et score de difficulté.
-     * Cette fonction sera appelée pour mettre à jour les sélecteurs globaux.
-     */
-    function calculateGlobalRequirements() {
-        let minTotalLines = MIN_POSSIBLE_CODE_LINES;
-        let minTotalVariables = 0; // Commence à 0, car on compte explicitement
-        let conceptualDifficultyScore = 0; // heuristique un peu bidon... à revoir
-        // Score de difficulté *conceptuelle* ?? basé sur les options sélectionnées
-
-        const getChecked = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
-        // prendre le type et utiliser VAR_COUNT_LIMITS si le sélecteur n'est pas là ou non visible
-        const getVarCount = (type) => {
-            const checkbox = document.getElementById(`var-${type}`);
-            const select = document.getElementById(`var-${type}-count`);
-            if (checkbox && checkbox.checked && select && select.style.display !== 'none') {
-                return parseInt(select.value);
-            }
-            return 0; // Retourne 0 si la checkbox de type n'est pas cochée ou le select masqué
-        };
-
-        // 1. Variables par type
-        let varCounts = {
-            int: getVarCount('int'),
-            float: getVarCount('float'),
-            str: getVarCount('str'),
-            list: getVarCount('list'),
-            bool: getVarCount('bool'),
-        };
-        
-        let explicitVarDeclarations = 0;
-        if (varCounts.int > 0) { explicitVarDeclarations += varCounts.int; conceptualDifficultyScore += 0; } // int est basique
-        if (varCounts.float > 0) { explicitVarDeclarations += varCounts.float; conceptualDifficultyScore += varCounts.float * 1; }
-        if (varCounts.str > 0) { explicitVarDeclarations += varCounts.str; conceptualDifficultyScore += varCounts.str * 2; }
-        if (varCounts.list > 0) { explicitVarDeclarations += varCounts.list; conceptualDifficultyScore += varCounts.list * 3; }
-        if (varCounts.bool > 0) { explicitVarDeclarations += varCounts.bool; conceptualDifficultyScore += varCounts.bool * 1; }
-        
-        minTotalVariables = Math.max(MIN_POSSIBLE_TOTAL_VARIABLES_GLOBAL, explicitVarDeclarations);
-        minTotalLines = Math.max(minTotalLines, explicitVarDeclarations); // 1 ligne par déclaration
-
-        // 2. Opérations
-        if (getChecked('op-mult-div-pow') || getChecked('op-modulo-floor')) { minTotalLines +=1; conceptualDifficultyScore += 2; if(minTotalVariables < 2 && explicitVarDeclarations < 2) minTotalVariables = Math.max(minTotalVariables, 2); }
-        if (getChecked('op-and') || getChecked('op-or')) { minTotalLines +=1; conceptualDifficultyScore += 3; if(minTotalVariables < 2 && explicitVarDeclarations < 2) minTotalVariables = Math.max(minTotalVariables, 2); }
-        if (getChecked('op-not')) { minTotalLines +=1; conceptualDifficultyScore += 2; if(minTotalVariables < 1 && explicitVarDeclarations < 1) minTotalVariables = Math.max(minTotalVariables, 1); }
-        if (getChecked('op-slice-ab') || getChecked('op-slice-abs')) {
-            conceptualDifficultyScore += 4;
-            if (varCounts.str > 0 || varCounts.list > 0) minTotalLines +=1;
-            else { minTotalLines +=2; if(minTotalVariables < 1 && explicitVarDeclarations < 1) minTotalVariables = Math.max(minTotalVariables, 1); }
-        }
-
-        // 3. Conditions (Ctrl)
-        let baseCondLines = 0; let condImpact = 0;
-        if (getChecked('cond-if')) { baseCondLines = 2; condImpact = 2;}
-        if (getChecked('cond-if-else')) { baseCondLines = Math.max(baseCondLines, 4); condImpact = Math.max(condImpact, 3);}
-        if (getChecked('cond-if-elif')) { baseCondLines = Math.max(baseCondLines, 4); condImpact = Math.max(condImpact, 4);}
-        if (getChecked('cond-if-elif-else')) { baseCondLines = Math.max(baseCondLines, 6); condImpact = Math.max(condImpact, 5);}
-        
-        if (baseCondLines > 0) {
-            conceptualDifficultyScore += condImpact;
-            minTotalLines += baseCondLines;
-            if (minTotalVariables < 1 && explicitVarDeclarations < 1) minTotalVariables = Math.max(minTotalVariables, 1);
-            if (getChecked('cond-if-if')) { minTotalLines += baseCondLines; conceptualDifficultyScore += 5; if(minTotalVariables < 2 && explicitVarDeclarations < 2) minTotalVariables = Math.max(minTotalVariables, 2);}
-            if (getChecked('cond-if-if-if')) { minTotalLines += baseCondLines * 2; conceptualDifficultyScore += 8; if(minTotalVariables < 3 && explicitVarDeclarations < 3) minTotalVariables = Math.max(minTotalVariables, 3);}
-        }
-
-        // 4. Boucles (Loop) - Adapter la logique comme pour les conditions
-        let loopSpecificVars = 0; // Variables spécifiquement pour les boucles (itération, bornes)
-        if (getChecked('loop-for-range')) { loopSpecificVars = Math.max(loopSpecificVars, 1); /* i */ }
-        if (getChecked('loop-range-ab')) { loopSpecificVars = Math.max(loopSpecificVars, 2); /* a, b (si pas déjà des vars) */ }
-        if (getChecked('loop-range-abs')) { loopSpecificVars = Math.max(loopSpecificVars, 3); /* a, b, s */ }
-        // Les variables de for sur list/str sont souvent la variable d'itération.
-        // La liste/str elle-même est comptée dans varCounts.
-        
-        // On n'ajoute loopSpecificVars à minTotalVariables que si elles ne sont pas déjà couvertes par explicitVarDeclarations.
-        // C'est compliqué... pour l'instant, on s'assure juste que minTotalVariables est assez grand.
-        if (getChecked('frame-loops')) {
-            minTotalVariables = Math.max(minTotalVariables, loopSpecificVars);
-        }
-        // ... (reprendre la logique de calcul de minTotalLines et conceptualDifficultyScore pour les boucles)
-
-        let baseLoopLines = 0; let loopVarCount = 0; let loopImpact = 0;
-        if (getChecked('loop-for-range')) { baseLoopLines=2; loopVarCount=1; loopImpact=3;}
-        if (getChecked('loop-for-list') || getChecked('loop-for-str')) { baseLoopLines=Math.max(baseLoopLines,2); loopVarCount=Math.max(loopVarCount,1); loopImpact=Math.max(loopImpact,4);}
-        if (getChecked('loop-while')) { baseLoopLines=Math.max(baseLoopLines,2); loopVarCount=Math.max(loopVarCount,1); loopImpact=Math.max(loopImpact,5);}
-
-        if (baseLoopLines > 0) {
-            minTotalLines += baseLoopLines;
-            minTotalVariables = Math.max(minTotalVariables, loopVarCount); // Les variables de boucle s'ajoutent si nécessaire
-            conceptualDifficultyScore += loopImpact;
-            if (getChecked('loop-nested-for2')) { minTotalLines +=2; minTotalVariables = Math.max(minTotalVariables, loopVarCount+1); conceptualDifficultyScore += 6;}
-            if (getChecked('loop-nested-for3')) { minTotalLines +=4; minTotalVariables = Math.max(minTotalVariables, loopVarCount+2); conceptualDifficultyScore += 9;}
-        }
-        if (getChecked('loop-range-ab')) { conceptualDifficultyScore += 2; minTotalVariables = Math.max(minTotalVariables, 2); } // a, b
-        if (getChecked('loop-range-abs')) { conceptualDifficultyScore += 3; minTotalVariables = Math.max(minTotalVariables, 3); } // a, b, s
-        if (getChecked('loop-while-op')) { conceptualDifficultyScore += 1; if(minTotalVariables < 2 && explicitVarDeclarations < 2) minTotalVariables = Math.max(minTotalVariables, 2);}
-
-
-        // 5. Fonctions (Func)
-        if (getChecked('frame-functions')) {
-            minTotalLines += 2; // def f(): pass
-            conceptualDifficultyScore += 5;
-            let funcParams = 0;
-            if (getChecked('func-def-a')) funcParams = 1;
-            if (getChecked('func-def-ab')) funcParams = Math.max(funcParams, 2);
-            minTotalVariables = Math.max(minTotalVariables, funcParams);
-            
-            if (getChecked('func-return')) { minTotalLines +=1; conceptualDifficultyScore += 2; }
-            if (getChecked('func-builtins')) { minTotalLines +=1; conceptualDifficultyScore += 1; }
-            if (getChecked('func-op-list')) { minTotalLines +=1; conceptualDifficultyScore += 3; if (varCounts.list === 0 && explicitVarDeclarations < 1) minTotalVariables = Math.max(minTotalVariables, 1);}
-            if (getChecked('func-op-str')) { minTotalLines +=1; conceptualDifficultyScore += 3; if (varCounts.str === 0 && explicitVarDeclarations < 1) minTotalVariables = Math.max(minTotalVariables, 1);}
-            // Prise en compte des builtins sélectionnés
-            if (getChecked('func-builtins')) {
-                conceptualDifficultyScore += 1; // Le fait d'utiliser des builtins ajoute un peu
-                let builtinsSelectedCount = 0;
-                BUILTINS_BASE.forEach(b => { if (getChecked(b.id)) builtinsSelectedCount++; });
-                if (advancedModeCheckbox.checked) {
-                    BUILTINS_ADVANCED.forEach(b => { if (getChecked(b.id)) builtinsSelectedCount++; });
-                }
-                if (builtinsSelectedCount > 0) {
-                    minTotalLines += builtinsSelectedCount; // 1 ligne par appel de builtin (approximatif)
-                    conceptualDifficultyScore += builtinsSelectedCount * 0.5; // Chaque builtin ajoute un peu de complexité
-                }
-            }
-            minTotalLines +=1; // Appel de la fonction
-        }
-
-        // --- Calcul final du niveau de difficulté global (1-6) ---
-        let calculatedDifficultyLevel = 1;
-        if (conceptualDifficultyScore > 0) {
-            // Échelle de mapping : ARBITRAIRE
-            // 0-5 pts -> niv 1, 6-10 -> niv 2, 11-15 -> niv 3, 16-22 -> niv 4, 23-30 -> niv 5, >30 -> niv 6
-            if (conceptualDifficultyScore <= 5) calculatedDifficultyLevel = 1;
-            else if (conceptualDifficultyScore <= 10) calculatedDifficultyLevel = 2;
-            else if (conceptualDifficultyScore <= 18) calculatedDifficultyLevel = 3;
-            else if (conceptualDifficultyScore <= 28) calculatedDifficultyLevel = 4;
-            else if (conceptualDifficultyScore <= 40) calculatedDifficultyLevel = 5;
-            else calculatedDifficultyLevel = 6;
-        }
-        // Synchroniser le sélecteur de difficulté global avec le niveau calculé
-        if (difficultyGlobalSelect) difficultyGlobalSelect.value = calculatedDifficultyLevel;
-
-
-        // Application des bornes globales pour lignes et total de variables
-        minTotalLines = Math.min(Math.max(minTotalLines, MIN_POSSIBLE_CODE_LINES), MAX_CODE_LINES);
-        minTotalVariables = Math.min(Math.max(minTotalVariables, MIN_POSSIBLE_TOTAL_VARIABLES_GLOBAL), MAX_TOTAL_VARIABLES_GLOBAL);
-        
-        // console.log(`GLOBAL REQS - Lines: ${minTotalLines}, Total Vars: ${minTotalVariables}, Conceptual Score: ${conceptualDifficultyScore}, Calc Diff: ${calculatedDifficultyLevel}`);
-        return { minLines: minTotalLines, minVariables: minTotalVariables };
-    }
-
-
-     /**
-     * Met à jour les options des menus déroulants pour "Longueur du Code" et "Nombre de variables"
-     * en fonction des minimums calculés.
-     */
-    function updateGlobalConfigSelectors() {
-        const { minLines, minVariables } = calculateGlobalRequirements();
-        
-        const currentNumLinesVal = numLinesGlobalSelect ? parseInt(numLinesGlobalSelect.value) : minLines;
-        const currentNumTotalVariablesVal = numTotalVariablesGlobalSelect ? parseInt(numTotalVariablesGlobalSelect.value) : minVariables;
-
-        populateSelectWithOptions(numLinesGlobalSelect, minLines, MAX_CODE_LINES, currentNumLinesVal);
-        populateSelectWithOptions(numTotalVariablesGlobalSelect, minVariables, MAX_TOTAL_VARIABLES_GLOBAL, currentNumTotalVariablesVal);
-        // console.log("Sélecteurs de configuration globale (Longueur, Nb Total Vars) mis à jour.");
-    }
-
-    // --- Attachement des listeners 
-    // pour la mise à jour des sélecteurs globaux ET interdépendances ---
-    // Le listener sur syntaxConfigArea et advancedModeCheckbox appellera déjà updateGlobalConfigSelectors
-    // et handleVisualInterdependencies avec un setTimeout.
-    // Délégation pour toutes les checkboxes de syntaxe (base et avancées)
-    const syntaxConfigArea = document.querySelector('.card-body .row.g-2.flex-wrap.align-items-start');
-    if (syntaxConfigArea) {
-        syntaxConfigArea.addEventListener('change', function(event) {
-            if (event.target.type === 'checkbox' || event.target.classList.contains('var-count-select')) {
-                setTimeout(updateGlobalConfigSelectors, 50); // Délai pour le DOM
-                // Gérer les interdépendances visuelles après chaque changement de syntaxe
-                setTimeout(handleVisualInterdependencies, 60); // Léger décalage
-            }
-        });
-    }
-    // Le listener pour advancedModeCheckbox est déjà configuré pour appeler updateGlobalConfigSelectors
-    // et handleVisualInterdependencies via son propre setTimeout.
-    // On s'assure juste que handleVisualInterdependencies est aussi appelé.
-    // // Listener direct pour le mode avancé car il affecte ce qui est disponible pour le calcul
-    if (advancedModeCheckbox) { // advancedModeCheckbox est déjà défini plus haut
-        advancedModeCheckbox.addEventListener('change', () => {
-            // updateGlobalConfigSelectors est déjà appelé par le listener du mode avancé dans la section précédente
-            // On ajoute juste l'appel pour les interdépendances ici aussi, après que les options avancées soient (dés)injectées
-            setTimeout(handleVisualInterdependencies, 150); // Un délai un peu plus long pour être sûr
-        });
-    }
-    // Le listener pour difficultyGlobalSelect N'EST PLUS NÉCESSAIRE ici pour appeler updateGlobalConfigSelectors,
-    // car la difficulté est maintenant un résultat du calcul. Si l'utilisateur la change, 
-    // c'est une entrée pour la génération, pas pour recalculer les autres min/max.
-
-    // Appel initial pour les interdépendances et la configuration globale
-    updateGlobalConfigSelectors();
-    handleVisualInterdependencies(); // Appel initial pour les interdépendances
-
-    // --- Gestion des interdépendances visuelles (ÉBAUCHE) ---
-    // Cette fonction gère les suggestions visuelles basées sur les options sélectionnées.
-    // Elle est appelée après chaque changement de syntaxe ou du mode avancé.
-    function handleVisualInterdependencies() {
-        const getChecked = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
-        // Fonction pour récupérer le compte d'une variable type si sa checkbox est cochée
-        const getVarCount = (type) => {
-            const checkbox = document.getElementById(`var-${type}`);
-            const select = document.getElementById(`var-${type}-count`);
-            if (checkbox && checkbox.checked && select && select.style.display !== 'none') {
-                return parseInt(select.value);
-            }
-            return 0;
-        };
-
-        // Classe CSS pour le surlignage des suggestions
-        const highlightClassContainer = 'suggestion-highlight-container';
-        const highlightClassSelect = 'suggestion-highlight-select';
-
-        // Fonction utilitaire pour ajouter/retirer la classe de surlignage au parent (.form-check.form-check-inline)
-        const toggleHighlight = (elementId, condition) => {
-            const element = document.getElementById(elementId);
-            if (element && element.parentElement && element.parentElement.classList.contains('form-check')) { // Cible le div.form-check parent
+        } else if (element && element.tagName === 'SELECT') { // Pour les selects directement
                 if (condition) {
-                    element.parentElement.classList.add(highlightClassContainer);
-                } else {
-                    element.parentElement.classList.remove(highlightClassContainer);
-                }
-            } else if (element && element.tagName === 'SELECT') { // Pour les selects directement
-                 if (condition) {
-                    element.classList.add(highlightClassSelect);
-                } else {
-                    element.classList.remove(highlightClassSelect);
-                }
-            }
-        };
-
-        // 1. Suggérer Slicing si List ou Str est coché
-        const strIsActive = getVarCount('str') > 0;
-        const listIsActive = getVarCount('list') > 0;
-        toggleHighlight('op-slice-ab', strIsActive || listIsActive);
-        toggleHighlight('op-slice-abs', strIsActive || listIsActive);
-
-        // 2. Suggérer Opérateurs Logiques (and, or, not) si Bool est coché
-        const boolIsActive = getVarCount('bool') > 0;
-        toggleHighlight('op-and', boolIsActive);
-        toggleHighlight('op-or', boolIsActive);
-        toggleHighlight('op-not', boolIsActive); // 'not' suggère aussi bool
-
-        // 3. Suggérer type Bool si 'not', 'and', ou 'or' est coché
-        const logicalOpActive = getChecked('op-and') || getChecked('op-or') || getChecked('op-not');
-        toggleHighlight('var-bool', logicalOpActive);
-        // Si un opérateur logique est actif et qu'on a moins de bools que nécessaire (1 pour not, 2 pour and/or)
-        const boolVarCountSelect = document.getElementById('var-bool-count');
-        if (logicalOpActive && getChecked('var-bool')) { // Seulement si la checkbox bool est déjà cochée
-             if ((getChecked('op-and') || getChecked('op-or')) && getVarCount('bool') < 2) {
-                if (boolVarCountSelect) boolVarCountSelect.classList.add(highlightClassSelect);
-            } else if (getChecked('op-not') && getVarCount('bool') < 1) { // Devrait toujours être au moins 1 si coché
-                if (boolVarCountSelect) boolVarCountSelect.classList.add(highlightClassSelect);
-            }
-             else {
-                if (boolVarCountSelect) boolVarCountSelect.classList.remove(highlightClassSelect);
-            }
-        } else {
-             if (boolVarCountSelect) boolVarCountSelect.classList.remove(highlightClassSelect);
-        }
-
-
-        // 4. Suggérer type Str/List si Slicing est coché
-        const slicingActive = getChecked('op-slice-ab') || getChecked('op-slice-abs');
-        toggleHighlight('var-str', slicingActive);
-        toggleHighlight('var-list', slicingActive);
-
-        // 5. Suggérer type List si 'opList' (Func) ou 'for_List' (Loop) est coché
-        const opListFuncActive = getChecked('func-op-list');
-        const forListLoopActive = getChecked('loop-for-list');
-        toggleHighlight('var-list', opListFuncActive || forListLoopActive || (slicingActive && !strIsActive)); // Suggère list pour slicing si str n'est pas déjà la raison
-
-        // 6. Suggérer type Str si 'opStr' (Func) ou 'for_Str' (Loop) est coché
-        const opStrFuncActive = getChecked('func-op-str');
-        const forStrLoopActive = getChecked('loop-for-str');
-        toggleHighlight('var-str', opStrFuncActive || forStrLoopActive || (slicingActive && !listIsActive)); // Suggère str pour slicing si list n'est pas déjà la raison
-
-        // 7. Suggérer Opérateurs Logiques (and, or, not) si 'while{op}' (Loop) est coché
-        const whileOpLoopActive = getChecked('loop-while-op');
-        toggleHighlight('op-and', whileOpLoopActive || boolIsActive); // Combine avec la suggestion précédente
-        toggleHighlight('op-or', whileOpLoopActive || boolIsActive);  // Combine
-        toggleHighlight('op-not', whileOpLoopActive || boolIsActive); // Combine
-
-        // console.log("Interdependencies updated.");
-    }
-
-
-    // --- Gestionnaire pour "Générer un Code Aléatoire" ---
-    // déjé déclaré: const generateCodeButton = document.getElementById('generate-code-btn');
-    if (generateCodeButton) {
-        generateCodeButton.addEventListener('click', function() {
-            //console.log("Bouton 'Générer un Code Aléatoire' cliqué.");
-            const getChecked = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
-            const getSelectVal = (id, defaultValIfNotFound = 0, typeIfVarCount = null) => {
-                const sel = document.getElementById(id);
-                if (typeIfVarCount) { // C'est un var-count-select
-                    const typeCheckbox = document.getElementById(`var-${typeIfVarCount}`);
-                    if (!typeCheckbox || !typeCheckbox.checked || !sel || sel.style.display === 'none') {
-                        return 0; // Si le type n'est pas coché ou select masqué, compte pour 0
-                    }
-                }
-                return sel ? parseInt(sel.value) : defaultValIfNotFound;
-            };
-            const generationOptions = {
-                // Variables et leur nombre
-                var_int_count: getSelectVal('var-int-count', 0, 'int'), // Nouveau
-                var_float_count: getSelectVal('var-float-count', 0, 'float'),
-                var_str_count: getSelectVal('var-str-count', 0, 'str'),
-                var_list_count: getSelectVal('var-list-count', 0, 'list'),
-                var_bool_count: getSelectVal('var-bool-count', 0, 'bool'),
-
-                // Opérations
-                op_plus_minus: getChecked('op-plus-minus'), // Toujours true car disabled
-                op_mult_div_pow: getChecked('op-mult-div-pow'), 
-                op_modulo_floor: getChecked('op-modulo-floor'),
-                op_and: getChecked('op-and'), 
-                op_or: getChecked('op-or'), 
-                op_not: getChecked('op-not'),
-                op_slice_ab: getChecked('op-slice-ab'), 
-                op_slice_abs: getChecked('op-slice-abs'),
-
-                // Conditions (Ctrl)
-                main_conditions: getChecked('frame-conditions'),
-                cond_if: getChecked('cond-if'), 
-                cond_if_else: getChecked('cond-if-else'),
-                cond_if_elif: getChecked('cond-if-elif'), 
-                cond_if_elif_else: getChecked('cond-if-elif-else'),
-                cond_if_if: getChecked('cond-if-if'), 
-                cond_if_if_if: getChecked('cond-if-if-if'),
-
-                // Boucles (Loop)
-                main_loops: getChecked('frame-loops'),
-                loop_for_range: getChecked('loop-for-range'), 
-                loop_for_list: getChecked('loop-for-list'),
-                loop_for_str: getChecked('loop-for-str'), 
-                loop_while: getChecked('loop-while'),
-                loop_nested_for2: getChecked('loop-nested-for2'), 
-                loop_nested_for3: getChecked('loop-nested-for3'),
-                loop_while_op: getChecked('loop-while-op'),
-                loop_range_ab: getChecked('loop-range-ab'), 
-                loop_range_abs: getChecked('loop-range-abs'),
-
-                // Fonctions (Func)
-                main_functions: getChecked('frame-functions'),
-                func_def_a: getChecked('func-def-a'),
-                // func_builtins: getChecked('func-builtins'), // La case principale builtins
-                // Builtins spécifiques (seront false si #func-builtins n'est pas cochée car ils ne seront pas dans le DOM)
-                builtin_print: getChecked('builtin-print'),
-                builtin_input: getChecked('builtin-input'),
-                builtin_len: getChecked('builtin-len'),
-                builtin_chr: getChecked('builtin-chr'),   // Avancé
-                builtin_ord: getChecked('builtin-ord'),   // Avancé
-                builtin_min: getChecked('builtin-min'),   // Avancé
-                builtin_max: getChecked('builtin-max'),   // Avancé
-                builtin_sum: getChecked('builtin-sum'),   // Avancé
-                
-                func_return: getChecked('func-return'),
-                func_def_ab: getChecked('func-def-ab'),     // Avancé
-                func_op_list: getChecked('func-op-list'),   // Avancé
-                func_op_str: getChecked('func-op-str'),     // Avancé
-                
-                // Paramètres globaux
-                difficultyLevelGlobal: parseInt(difficultyGlobalSelect.value),
-                numLinesGlobal: parseInt(numLinesGlobalSelect.value),
-                numTotalVariablesGlobal: parseInt(numTotalVariablesGlobalSelect.value)
-            };
-            console.log("Options de génération finales pour code-generator:", generationOptions);
-            
-            var newGeneratedCode = "";
-            if (typeof generateRandomPythonCode === 'function') { 
-                newGeneratedCode = generateRandomPythonCode(generationOptions); 
+                element.classList.add(highlightClassSelect);
             } else {
-                console.warn("generateRandomPythonCode n'est pas définie.");
-                newGeneratedCode = "# Erreur: Le générateur de code aléatoire n'est pas disponible.";
+                element.classList.remove(highlightClassSelect);
             }
-            
-            // Invalider l'état du diagramme actuel car un nouveau code est généré
-            lastDiagramAstDump = "";
-            
-            if(codeEditorInstance) codeEditorInstance.setValue(newGeneratedCode);
-            memorizeLoadedCode(newGeneratedCode);
-            setDiagramAndChallengeCardState("default");
-            
-            var flowchartDisplayArea = document.getElementById('flowchart');
-            if (flowchartDisplayArea) flowchartDisplayArea.innerHTML = '<p class="text-center text-muted mt-3">Nouveau code généré. Cliquez sur "Lancer..."</p>';
-            
-            resetChallengeInputs();
-            const checkBtn = document.getElementById('check-answers-btn');
-            const showSolBtn = document.getElementById('show-solution-btn');
-            if(checkBtn) checkBtn.disabled = true;
-            if(showSolBtn) showSolBtn.disabled = true;
-        });
+        }
+    };
+
+    // 1. Suggérer Slicing si List ou Str est coché
+    const strIsActive = getVarCount('str') > 0;
+    const listIsActive = getVarCount('list') > 0;
+    toggleHighlight('op-slice-ab', strIsActive || listIsActive);
+    toggleHighlight('op-slice-abs', strIsActive || listIsActive);
+
+    // 2. Suggérer Opérateurs Logiques (and, or, not) si Bool est coché
+    const boolIsActive = getVarCount('bool') > 0;
+    toggleHighlight('op-and', boolIsActive);
+    toggleHighlight('op-or', boolIsActive);
+    toggleHighlight('op-not', boolIsActive); // 'not' suggère aussi bool
+
+    // 3. Suggérer type Bool si 'not', 'and', ou 'or' est coché
+    const logicalOpActive = getChecked('op-and') || getChecked('op-or') || getChecked('op-not');
+    toggleHighlight('var-bool', logicalOpActive);
+    // Si un opérateur logique est actif et qu'on a moins de bools que nécessaire (1 pour not, 2 pour and/or)
+    const boolVarCountSelect = document.getElementById('var-bool-count');
+    if (logicalOpActive && getChecked('var-bool')) { // Seulement si la checkbox bool est déjà cochée
+            if ((getChecked('op-and') || getChecked('op-or')) && getVarCount('bool') < 2) {
+            if (boolVarCountSelect) boolVarCountSelect.classList.add(highlightClassSelect);
+        } else if (getChecked('op-not') && getVarCount('bool') < 1) { // Devrait toujours être au moins 1 si coché
+            if (boolVarCountSelect) boolVarCountSelect.classList.add(highlightClassSelect);
+        }
+            else {
+            if (boolVarCountSelect) boolVarCountSelect.classList.remove(highlightClassSelect);
+        }
     } else {
-        console.warn("Bouton 'generate-code-btn' non trouvé.");
+            if (boolVarCountSelect) boolVarCountSelect.classList.remove(highlightClassSelect);
     }
 
-// --- Gestion de la synchronisation diagramme/code ---
 
-// Variable globale pour stocker le dump AST du dernier diagramme généré
-let lastDiagramAstDump = "";
+    // 4. Suggérer type Str/List si Slicing est coché
+    const slicingActive = getChecked('op-slice-ab') || getChecked('op-slice-abs');
+    toggleHighlight('var-str', slicingActive);
+    toggleHighlight('var-list', slicingActive);
+
+    // 5. Suggérer type List si 'opList' (Func) ou 'for_List' (Loop) est coché
+    const opListFuncActive = getChecked('func-op-list');
+    const forListLoopActive = getChecked('loop-for-list');
+    toggleHighlight('var-list', opListFuncActive || forListLoopActive || (slicingActive && !strIsActive)); // Suggère list pour slicing si str n'est pas déjà la raison
+
+    // 6. Suggérer type Str si 'opStr' (Func) ou 'for_Str' (Loop) est coché
+    const opStrFuncActive = getChecked('func-op-str');
+    const forStrLoopActive = getChecked('loop-for-str');
+    toggleHighlight('var-str', opStrFuncActive || forStrLoopActive || (slicingActive && !listIsActive)); // Suggère str pour slicing si list n'est pas déjà la raison
+
+    // 7. Suggérer Opérateurs Logiques (and, or, not) si 'while{op}' (Loop) est coché
+    const whileOpLoopActive = getChecked('loop-while-op');
+    toggleHighlight('op-and', whileOpLoopActive || boolIsActive); // Combine avec la suggestion précédente
+    toggleHighlight('op-or', whileOpLoopActive || boolIsActive);  // Combine
+    toggleHighlight('op-not', whileOpLoopActive || boolIsActive); // Combine
+
+    // console.log("Interdependencies updated.");
+}
+
 
 // Fonction utilitaire pour obtenir le dump AST du code courant via Pyodide
 async function getAstDumpFromCode(code) {
@@ -982,8 +632,9 @@ async function getAstDumpFromCode(code) {
         const pyScript = `
 import ast
 try:
-    cfg_instance = ControlFlowGraph(user_python_code)
-    result = ast.dump(cfg_instance.tree)
+    # On ne fait que parser, pas besoin de générer le graphe complet ici.
+    tree = ast.parse(user_python_code)
+    result = ast.dump(tree)
 except Exception:
     result = None # Retourne None si le code est syntaxiquement invalide
 result
@@ -1003,7 +654,9 @@ result
 function setDiagramAndChallengeCardState(state) {
     const diagramCard = document.getElementById('flowchart')?.closest('.card');
     const challengeCard = document.getElementById('variables-container')?.closest('.card');
-    
+    const checkBtn = document.getElementById('check-answers-btn');
+    const showSolBtn = document.getElementById('show-solution-btn');
+
     [diagramCard, challengeCard].forEach(card => {
         if (!card) return;
         // Nettoyer toutes les classes de bordure potentielles
@@ -1026,421 +679,55 @@ function setDiagramAndChallengeCardState(state) {
         runBtn.classList.remove('btn-danger', 'btn-success');
         if (state === "outdated") {
             runBtn.classList.add('btn-danger');
+            if (checkBtn) checkBtn.disabled = true;
+            if (showSolBtn) showSolBtn.disabled = true;
+            resetChallengeInputs(challengeVariablesContainer, "outdated"); // On passe l'état pour un message personnalisé
         } else {
             runBtn.classList.add('btn-success');
         }
     }
 }
 
-
-// Listener sur l’éditeur CodeMirror pour détecter les changements
-if (codeEditorInstance) {
-    codeEditorInstance.on('change', async function() {
-        // Si Pyodide n'est pas prêt, on ne fait rien.
-        if (!pyodide) return;
-        
-        // Si lastDiagramAstDump est vide ou null, cela signifie qu'aucun diagramme
-        // n'est actuellement affiché ou qu'il a été invalidé (ex: par un reload).
-        // Dans ce cas, le code ne peut pas être "périmé". L'état est "default".
-        if (!lastDiagramAstDump) {
-            setDiagramAndChallengeCardState("default");
-            return;
-        }
-
-        const currentCode = codeEditorInstance.getValue();
-        const currentAstDump = await getAstDumpFromCode(currentCode);
-
-        // Si le code actuel est syntaxiquement invalide, currentAstDump sera null.
-        // On considère cela comme "périmé" car il ne peut pas correspondre au diagramme.
-        if (!currentAstDump) {
-            setDiagramAndChallengeCardState("outdated");
-            return;
-        }
-        
-        // Comparer le dump AST du code courant à celui du dernier diagramme généré.
-        if (currentAstDump !== lastDiagramAstDump) {
-            setDiagramAndChallengeCardState("outdated");
-        } else {
-            setDiagramAndChallengeCardState("default");
-        }
-    });
-}
-    // Gestionnaire pour le bouton "Lancer le diagramme et les défis" (#run-code-btn).
-    const runCodeButton = document.getElementById('run-code-btn');
-    if (runCodeButton) {
-        runCodeButton.addEventListener('click', async function() {
-            console.log("Bouton 'Lancer le diagramme et les défis' cliqué.");
-            
-            if (!codeEditorInstance) {
-                console.error("L'instance de CodeMirror n'est pas disponible.");
-                alert("Erreur : L'éditeur de code n'est pas initialisé.");
-                return;
-            }
-            const currentCode = codeEditorInstance.getValue();
-
-            // 1. Mettre à jour le diagramme de flux.
-            try {
-                if (typeof triggerFlowchartUpdate === 'function') {
-                    await triggerFlowchartUpdate(); 
-                } else {
-                    throw new Error("La fonction triggerFlowchartUpdate n'est pas définie.");
-                }
-            } catch (e) {
-                console.error("Erreur lors de la mise à jour du diagramme de flux:", e);
-                alert("Erreur : Impossible de mettre à jour le diagramme de flux. Veuillez vérifier la console pour plus de détails.");
-                return; // Ne pas continuer si le diagramme n'a pas pu être mis à jour
-            }
-            
-            // 2. Mettre à jour le dump AST de référence. C'est le point crucial.
-            //    C'est maintenant la nouvelle "source de vérité" pour le diagramme affiché.
-            try {
-                if (pyodide) {
-                    const astDump = await getAstDumpFromCode(currentCode);
-                    if (astDump) {
-                        lastDiagramAstDump = astDump;
-                        console.log("lastDiagramAstDump mis à jour avec succès.");
-                    } else {
-                        // Le code est syntaxiquement invalide, le diagramme a affiché une erreur.
-                        // On invalide le dump pour que toute modification future ne soit pas comparée à un état inexistant.
-                        lastDiagramAstDump = "";
-                    }
-                }
-            } catch (e) {
-                console.warn("Impossible de mettre à jour le dump AST de référence:", e);
-                lastDiagramAstDump = ""; // Invalider en cas d'erreur
-            }
-            
-            // 3. Après la mise à jour réussie, l'état est "default".
-            setDiagramAndChallengeCardState("default");
-            
-            // 4. Exécuter le code Python pour obtenir les valeurs des variables pour le défi.
-            try {
-                variableValuesFromExecution = {}; 
-                resetChallengeInputs();
-                
-                if (typeof pyodide !== 'undefined' && pyodide) {
-                     variableValuesFromExecution = await runAndTraceCodeForChallenge(currentCode, pyodide);
-                } else {
-                    console.warn("Pyodide n'est pas encore prêt pour exécuter le code du défi.");
-                    alert("Le moteur Python n'est pas encore prêt. Veuillez patienter.");
-                    const checkAnswersButton = document.getElementById('check-answers-btn');
-                    const showSolutionButton = document.getElementById('show-solution-btn');
-                    if (checkAnswersButton) checkAnswersButton.disabled = true;
-                    if (showSolutionButton) showSolutionButton.disabled = true;
-                    return;
-                }
-
-                // 5. Mettre à jour l'interface du défi avec les variables trouvées.
-                if (Object.keys(variableValuesFromExecution).length > 0) {
-                    populateChallengeInputs(variableValuesFromExecution);
-                } else {
-                    const container = document.getElementById('variables-container');
-                    if (container) {
-                        container.innerHTML = `
-                            <div class="col-12 text-center text-warning">
-                                <p>Aucune variable à suivre n'a été trouvée après l'exécution du code.<br>
-                                Vérifiez que votre code contient bien des affectations de variables accessibles.</p>
-                            </div>`;
-                    }
-                }
-                
-                // 6. Activer les boutons du défi si des variables ont été trouvées.
-                const hasVariables = Object.keys(variableValuesFromExecution).length > 0;
-                const checkAnswersButton = document.getElementById('check-answers-btn');
-                const showSolutionButton = document.getElementById('show-solution-btn');
-                if (checkAnswersButton) checkAnswersButton.disabled = !hasVariables;
-                if (showSolutionButton) showSolutionButton.disabled = !hasVariables;
-
-            } catch (error) {
-                console.error("Erreur lors de l'exécution du code pour le défi:", error);
-                const container = document.getElementById('variables-container');
-                if (container) {
-                    container.innerHTML = `
-                        <div class="col-12 text-center text-danger">
-                            <p>Erreur lors de l'exécution du code Python pour le défi :<br>
-                            <code>${error.message}</code></p>
-                        </div>`;
-                }
-                const checkAnswersButton = document.getElementById('check-answers-btn');
-                const showSolutionButton = document.getElementById('show-solution-btn');
-                if (checkAnswersButton) checkAnswersButton.disabled = true;
-                if (showSolutionButton) showSolutionButton.disabled = true;
-            }
-        });
-    }
-
-    // Gestionnaire pour le bouton "Vérifier les réponses" (#check-answers-btn).
-    const checkAnswersButton = document.getElementById('check-answers-btn');
-    if (checkAnswersButton) {
-        checkAnswersButton.addEventListener('click', function() {
-            console.log("Bouton 'Vérifier les réponses' cliqué.");
-            if (typeof checkStudentAnswers === 'function') { 
-                const results = checkStudentAnswers(variableValuesFromExecution);
-                if (typeof showFeedbackModal === 'function') { 
-                    showFeedbackModal(results);
-                }
-            } else {
-                console.warn("La fonction checkStudentAnswers n'est pas définie.");
-            }
-        });
-    }
-
-    // Gestionnaire pour le bouton "Révéler la solution" (#show-solution-btn).
-    const showSolutionButton = document.getElementById('show-solution-btn');
-    if (showSolutionButton) {
-        showSolutionButton.addEventListener('click', function() {
-            console.log("Bouton 'Révéler la solution' cliqué.");
-            if (typeof revealCorrectSolution === 'function') { 
-                revealCorrectSolution(variableValuesFromExecution);
-            } else {
-                console.warn("La fonction revealCorrectSolution n'est pas définie.");
-            }
-        });
-    }
-    
-    // Gestionnaire pour le bouton "Effacer la console"
-    const clearConsoleBtn = document.getElementById('clear-console-btn');
-    if (clearConsoleBtn) {
-        clearConsoleBtn.addEventListener('click', clearConsole);
-    }
-    
-    // Gestionnaire pour le bouton "Effacer le dessin Turtle"
-    const clearTurtleBtn = document.getElementById('clear-turtle-canvas-btn');
-    if (clearTurtleBtn) {
-        clearTurtleBtn.addEventListener('click', () => {
-            const canvas = document.getElementById('turtle-canvas');
-            if (canvas) {
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-            }
-        });
-    }
-
-    // --- Fonctions utilitaires pour la section Défi ---
-
-    /**
-     * Réinitialise l'affichage des champs de saisie pour les variables du défi.
-     */
-    function resetChallengeInputs() {
-        const container = document.getElementById('variables-container');
-        if (container) {
-            container.innerHTML = `
-                <div class="col-12 text-center text-muted">
-                    <p><i class="fas fa-code me-2"></i>Lancer le diagramme et les défis pour voir les variables...</p>
-                </div>`;
-        }
-        variableValuesFromExecution = {}; 
-    }
-
-    /**
-     * Remplit la section du défi avec des champs de saisie pour chaque variable trouvée.
-     * @param {Object} variables - Un objet où les clés sont les noms des variables et les valeurs sont leurs valeurs finales.
-     */
-    function populateChallengeInputs(variables) {
-        const container = document.getElementById('variables-container');
-        if (!container) return;
-        container.innerHTML = ''; 
-
-        if (Object.keys(variables).length === 0) {
-            container.innerHTML = `
-                <div class="col-12 text-center text-muted">
-                    <p>Aucune variable à suivre n'a été trouvée après l'exécution du code. Essayez d'ajouter des affectations de variables dans votre code.</p>
-                </div>`;
-            return;
-        }
-
-        const headerRow = document.createElement('div');
-        headerRow.className = 'row mb-3'; 
-        headerRow.innerHTML = `
-            <div class="col-12">
-                <h4 class="h6 mb-3">Quelle est la valeur de chaque variable à la fin de l'exécution ?</h4>
-            </div>`;
-        container.appendChild(headerRow);
-        
-        const variablesGrid = document.createElement('div');
-        variablesGrid.className = 'row g-3'; 
-        
-        Object.keys(variables).sort().forEach(varName => {
-            const colDiv = document.createElement('div');
-            colDiv.className = 'col-lg-4 col-md-6 col-sm-12'; // mb-3 retiré pour le mettre sur input-group direct
-            
-            const inputGroup = document.createElement('div');
-            inputGroup.className = 'input-group mb-3'; // Ajout de mb-3 ici
-
-            const inputGroupText = document.createElement('span');
-            inputGroupText.className = 'input-group-text';
-            inputGroupText.innerHTML = `<code>${varName}</code> =`; 
-            
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'form-control student-answer-input'; 
-            input.id = `var-input-${varName}`; 
-            input.name = varName; 
-            input.placeholder = `Valeur de ${varName}...`;
-            input.setAttribute('aria-label', `Valeur de ${varName}`);
-            
-            inputGroup.appendChild(inputGroupText);
-            inputGroup.appendChild(input);
-            colDiv.appendChild(inputGroup);
-            variablesGrid.appendChild(colDiv);
-        });
-        container.appendChild(variablesGrid);
-    }
-
-    /**
-     * Affiche la modale de feedback avec les résultats de la vérification.
-     * @param {Object} feedbackResults - Les résultats de la vérification. Structure: { varName: { studentAnswer: '', correctAnswer: '', isCorrect: true/false }}
-     */
-    function showFeedbackModal(feedbackResults) {
-        const modalEl = document.getElementById('feedback-modal');
-        if (!modalEl) return;
-
-        const modalTitle = modalEl.querySelector('.modal-title'); // Utilise querySelector sur l'élément modal
-        const modalBody = modalEl.querySelector('.modal-body');   // Utilise querySelector
-        const tryAgainButton = modalEl.querySelector('#modal-try-again-btn'); // Utilise querySelector
-
-        if (!modalTitle || !modalBody || !tryAgainButton) {
-            console.error("Éléments de la modale de feedback non trouvés.");
-            return;
-        }
-        
-        let contentHtml = '<ul class="list-group list-group-flush">'; // list-group-flush pour enlever les bordures externes
-        let allCorrect = true;
-        let hasResults = false;
-
-        for (const varName in feedbackResults) {
-            hasResults = true;
-            const result = feedbackResults[varName];
-            const iconClass = result.isCorrect ? 'fa-check-circle text-success' : 'fa-times-circle text-danger';
-            const listItemClass = result.isCorrect ? 'list-group-item-success' : 'list-group-item-danger';
-            
-            contentHtml += `<li class="list-group-item ${listItemClass}">`;
-            contentHtml += `<i class="fas ${iconClass} me-2"></i>`;
-            contentHtml += `<strong>${varName}</strong>: Votre réponse : <code class="user-answer">${result.studentAnswer || "(vide)"}</code>. `;
-            if (!result.isCorrect) {
-                allCorrect = false;
-                // contentHtml += `Attendu : <code>${result.correctAnswer}</code>.`;
-            }
-            contentHtml += `</li>`;
-        }
-        contentHtml += '</ul>';
-
-        if (!hasResults) {
-             modalTitle.innerHTML = '<i class="fas fa-info-circle me-2"></i> Pas de réponses';
-             contentHtml = '<p>Vous n\'avez fourni aucune réponse. Veuillez essayer de prédire les valeurs des variables.</p>';
-             tryAgainButton.classList.add('d-none');
-        } else if (allCorrect) {
-            modalTitle.innerHTML = '<i class="fas fa-check-circle text-success me-2"></i> Félicitations !';
-            contentHtml = '<p class="text-success mb-2">Toutes vos réponses sont correctes ! Excellent travail !</p>' + contentHtml;
-            tryAgainButton.classList.add('d-none'); // Cache le bouton "Réessayer" si tout est correct
-        } else {
-            modalTitle.innerHTML = '<i class="fas fa-exclamation-triangle text-warning me-2"></i> Résultats';
-            contentHtml = '<p class="mb-2">Certaines réponses sont incorrectes. Vérifiez les détails ci-dessous :</p>' + contentHtml;
-            tryAgainButton.classList.remove('d-none'); // Montre le bouton "Réessayer"
-        }
-        
-        modalBody.innerHTML = contentHtml;
-
-        const feedbackModalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
-        feedbackModalInstance.show();
-    }
-
-    // --- Initialisation au chargement de la page ---
-
-    var defaultPythonCode = 
-`# Code Python d'exemple
-# Modifiez-le ou générez un nouveau code.
-x = 5
-y = 10
-if x > y:
-    result = "x est plus grand"
-else:
-    result = "y est plus grand ou égal"
-# print(result) # Mis en commentaire pour ne pas interférer avec l'extraction des variables
-z = x + y`;
-    if (codeEditorInstance) {
-        codeEditorInstance.setValue(defaultPythonCode);
-        memorizeLoadedCode(defaultPythonCode);
-    }
-
-    var flowchartDisplayArea = document.getElementById('flowchart');
-    if (flowchartDisplayArea) {
-        flowchartDisplayArea.innerHTML = '<p class="text-center text-muted mt-3">Cliquez sur "Lancer le diagramme et les défis" pour générer le diagramme de flux.</p>';
-    }
-
-    resetChallengeInputs();
-    const checkBtn = document.getElementById('check-answers-btn');
-    const showSolBtn = document.getElementById('show-solution-btn');
-    if (checkBtn) checkBtn.disabled = true;
-    if (showSolBtn) showSolBtn.disabled = true;
-    
-    // État initial des cartes
-    setDiagramAndChallengeCardState("default");
-
-}); // Fin de DOMContentLoaded
-
-
 // --- Fonctions pour le Défi (déplacées de l'intérieur de DOMContentLoaded pour être globales si nécessaire, mais restent dans ce scope) ---
 
-async function runAndTraceCodeForChallenge(code, pyodideInstance) { // pyodideInstance au lieu de pyodide global
+async function runAndTraceCodeForChallenge(code, pyodideInstance) {
     console.log("Exécution du code pour le défi maintenant avec I/O personnalisés...");
     clearConsole();
 
-    // --- Gestion de Turtle (Méthode Basthon) ---
     const turtleCard = document.getElementById('turtle-graphics-card');
     const turtleCanvas = document.getElementById('turtle-canvas');
     let turtleSetupCode = "";
 
-    // 1. Détection et chargement à la demande
-    // On suppose que turtle est installé. On ne fait que la configuration.
+    // Correction de la structure `if/try/catch/else`
     if (code.includes("import turtle")) {
         try {
-            await pyodideInstance.loadPackage('turtle'); // ou bien "turtle" ??
+            await pyodideInstance.loadPackage('turtle');
             if (turtleCard && turtleCanvas) {
                 turtleCard.style.display = 'block';
-                // Le nettoyage du canvas se fait ICI UNIQUEMENT au début, et pas à la fin.
-                // la solution au problème de la fenêtre blanche ??
                 const ctx = turtleCanvas.getContext('2d');
                 ctx.clearRect(0, 0, turtleCanvas.width, turtleCanvas.height);
-                // Le module turtle est déjà installé. On lui dit juste où dessiner.
                 turtleSetupCode = `
 import sys
 import pyo_js_turtle as turtle
 sys.modules['turtle'] = turtle
 turtle.Screen().setup(target_id='turtle-canvas')
-`; //turtle.setup_canvas('turtle-canvas') 
+`;
+            }
+        } catch (e) {
+            console.error("Erreur lors du chargement du paquet Turtle:", e);
+            logToConsole(formatPythonError(e.message), 'error');
+            return {}; // Arrêter si Turtle échoue
         }
-    } catch (e) {
-        console.error("Erreur lors du chargement du paquet Turtle:", e);
-        logToConsole(formatPythonError(e.message), 'error');
-        return {}; // On arrête l'exécution si Turtle échoue
-    }
-} else if (turtleCard) {
-        turtleCard.style.display = 'none'; // Masquer si turtle n'est pas utilisé
+    } else {
+        if (turtleCard) {
+            turtleCard.style.display = 'none'; // Masquer si turtle n'est pas utilisé
+        }
     }
 
-    // 1. Rendre nos fonctions JS accessibles à Pyodide
     pyodideInstance.globals.set("js_print_handler", logToConsole);
     pyodideInstance.globals.set("js_input_handler", handlePythonInput);
+    pyodideInstance.globals.set("student_code_to_run", code);
 
-    // On passe le code à Pyodide via des variables globales, pas par injection de chaîne.
-    // beaucoup plus robuste ??
-    pyodideInstance.globals.set("turtle_setup_script", turtleSetupCode);
-    pyodideInstance.globals.set("student_code_to_run", code); // On passe le code brut ici
-    // On utilise une variable globale pour le code de l'élève:
-    /* PLUS BESOIN D'ECHAPPER LES GUILLEMETS TRIPLES
-    * // On échappe les guillemets triples pour éviter les conflits dans le code Python
-    * // On échappe les backslashes pour éviter les erreurs de syntaxe
-    * const escapedCodeForPythonTripleQuotes = code
-    *    .replace(/\\/g, '\\\\') 
-    *    .replace(/"""/g, '\\"\\"\\"'); 
-    */
-
-    // On passe l'objet pyodide lui-même au script Python pour qu'il puisse l'utiliser ??
-    // pyodideInstance.globals.set("pyodide", pyodideInstance);
-
-    // Définition des fonctions "custom" puis filtrage des variables
-    // 2. Le wrapper Python qui redéfinit les builtins et exécute le code
     const tracingWrapper = `
 import builtins
 import io
@@ -1448,100 +735,146 @@ import sys
 import json
 import types
 import asyncio
-import pyodide ###############################################
+import pyodide
 from pyodide.ffi import to_js
 import ast
 
+# --- Redirection des entrées/sorties (I/O) ---
+_original_print = builtins.print
+_original_input = builtins.input
+
+def custom_print(*args, **kwargs):
+    s_io = io.StringIO()
+    kwargs['file'] = s_io
+    _original_print(*args, **kwargs)
+    message = s_io.getvalue()
+    js_print_handler(message)
+
+async def custom_input(prompt=""):
+    response = await js_input_handler(prompt)
+    js_print_handler(str(prompt) + str(response) + '\\n', 'output')
+    return response
+
+builtins.print = custom_print
+builtins.input = custom_input
+
+# --- Moteur d'exécution et transformateurs d'AST ---
+
+user_ns = {} 
+_error_detail_trace = None
+# Variable globale pour stocker les noms des fonctions que nous rendons asynchrones
+_async_function_names = set()
+
+# Transformateur 1: Trouve 'def' et le transforme en 'async def',
+# tout en mémorisant les noms des fonctions transformées.
+class AsyncFunctionTransformer(ast.NodeTransformer):
+    def visit_FunctionDef(self, node):
+        global _async_function_names
+        _async_function_names.add(node.name)
+        # On reconstruit le noeud de fonction en tant que AsyncFunctionDef,
+        # en conservant tous ses attributs (nom, arguments, corps, etc.).
+        self.generic_visit(node) # S'assurer de visiter les enfants d'abord
+        return ast.AsyncFunctionDef(
+            name=node.name,
+            args=node.args,
+            body=node.body,
+            decorator_list=node.decorator_list,
+            returns=node.returns,
+            type_comment=getattr(node, 'type_comment', None)
+        )
+
+# Transformateur 2: 'input()' -> 'await input()'
 class AwaitInputTransformer(ast.NodeTransformer):
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "input":
             return ast.Await(value=node)
         return self.generic_visit(node)
 
+# RAPPEL Un appel de fonction de premier niveau est un noeud 'Expr' contenant un noeud 'Call'.
 
-# --- Stockage des originaux et initialisation ---
-_original_print = builtins.print
-_original_input = builtins.input
-user_ns = {}
-_final_vars = {}
-_error_detail_trace = None
 
-# --- Redéfinition de print() ---
-def custom_print(*args, **kwargs):
-    # On utilise un buffer pour capturer la sortie formatée par print
-    s_io = io.StringIO()
-    # On force la sortie à aller dans notre buffer au lieu de la console
-    kwargs['file'] = s_io
-    _original_print(*args, **kwargs)
-    message = s_io.getvalue()
-    # On appelle le handler JS avec la chaîne capturée
-    js_print_handler(message)
+# Transformateur 3 utilise visit_Call
+class AwaitCallTransformer(ast.NodeTransformer):
+    def visit_Call(self, node):
+        # D'abord transformer récursivement les sous-nœuds (arguments, mots-clés, fonction cible)
+        self.generic_visit(node)
 
-# --- Redéfinition de input() ---
-# C'est une fonction asynchrone car elle doit attendre le JS
-async def custom_input(prompt=""):
-    # On appelle le handler JS, qui retourne une Promise.
-    # L'await ici met en pause l'exécution Python jusqu'à ce que la Promise soit résolue.
-    response = await js_input_handler(prompt)
-    # On affiche aussi l'invite et la réponse dans la console pour la traçabilité
-    js_print_handler(str(prompt) + str(response) + '\\n', 'output')
-    return response
+        # Identification du nom de la fonction appelée
+        func_name = None
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            # Pour obj.methode, on prend .attr; ajustez si vous avez une autre logique
+            func_name = node.func.attr
 
-# --- Surcharge des builtins ---
-builtins.print = custom_print
-builtins.input = custom_input
+        # Vérifier si déjà dans un ast.Await (pas de parent direct dans l’AST standard;
+        # ce cas ne se produit que si l’élève a écrit 'await f()' => alors node est value d'un ast.Await)
+        # Ici on protège en ne re-plaçant pas si le parent était déjà un Await lors d'un passage précédent.
+        # Sans parent tracking, on peut au moins éviter un double enveloppement en testant un marqueur.
+        if hasattr(node, '_already_awaited'):
+            return node  # Sécurité (marqueur interne)
 
-# --- Exécution et traçage ---
+        if func_name and func_name in _async_function_names:
+            awaited = ast.Await(value=node)
+            # Marquer pour éviter double traitement si revisité
+            node._already_awaited = True
+            ast.copy_location(awaited, node)
+            ast.fix_missing_locations(awaited)
+            return awaited
+
+        return node
+
+# Fonction 'main' asynchrone MISE À JOUR pour orchestrer les 3 transformations
 async def main():
-    # Cette fonction 'main' asynchrone va contenir l'exécution du code
-    global _error_detail_trace, user_ns # Rendre les variables accessibles
+    global _error_detail_trace, user_ns
 
     try:
         from ast import unparse
-        
-        # On utilise pyodide.code.eval_code_async qui est conscient de l'asynchronisme.
-        # Il va gérer les 'await' implicites sur les fonctions comme notre custom_input.
-        
-        # On exécute d'abord le code de configuration de Turtle (qui est synchrone)
-        exec(turtle_setup_script, user_ns)
-        
         tree = ast.parse(student_code_to_run)
-        transformed_tree = AwaitInputTransformer().visit(tree)
-        ast.fix_missing_locations(transformed_tree)
-        transformed_code_string = unparse(transformed_tree)
 
-        # CORRECTION POUR PROBLÈME COROUTINE !!
+        # ÉTAPE 1: Rendre les fonctions asynchrones ('def' -> 'async def')
+        asyncified_tree = AsyncFunctionTransformer().visit(tree)
+
+        # ÉTAPE 2: Gérer les 'await' pour input()
+        # C'est seulement après que les fonctions sont 'async' qu'on peut y insérer des 'await'.
+        input_awaited_tree = AwaitInputTransformer().visit(asyncified_tree)
+        
+        # ÉTAPE 3: Gérer les 'await' pour les appels aux fonctions maintenant asynchrones
+        final_tree = AwaitCallTransformer().visit(input_awaited_tree)
+
+        ast.fix_missing_locations(final_tree)
+        transformed_code_string = unparse(final_tree)
+
+        # Le code qui sera exécuté contient maintenant 'async def' pour les fonctions
+        # et 'await input()', ce qui est une syntaxe Python valide.
         await pyodide.code.eval_code_async(transformed_code_string, globals=user_ns)
 
     except Exception as e:
         import traceback
         _error_detail_trace = traceback.format_exc()
     finally:
-        # --- Restauration des builtins originaux ---
         builtins.print = _original_print
         builtins.input = _original_input
 
+await main()
 
-# On lance notre fonction 'main' asynchrone et on attend sa complétion.
-await main()  
-
-# --- Traçage des variables (si pas d'erreur) ---
+# --- Extraction des résultats pour le Défi (INCHANGÉ) ---
+# j'en rajoute qui ne devraient pas avoir à être filtrées car traumatisé par bug pyodide de persistance de variables dans le namespace
+_final_vars = {}
 if _error_detail_trace is None:
     for _var_name, _val in user_ns.items():
         if _var_name.startswith('__') or isinstance(_val, (types.ModuleType, types.FunctionType, type)):
             continue
-        # ... (votre logique de filtrage existante) ...
-        if _var_name in ['pyodide', 'sys', 'micropip', 'json', 'types', 'ast', 'traceback', 
-                         'error_detail', 'current_code', 'user_python_code', 
+        if _var_name in ['pyodide', 'sys', 'micropip', 'json', 'types', 'ast', 'traceback',
+                         'error_detail', 'current_code', 'user_python_code',
                          'cfg_instance', 'mermaid_output', 'error_message', 'output_dict',
                          'parsed_code_string', 'List', 'Dict', 'Set', 'Tuple', 'Optional',
                          '_syntax_check_result', '_error_detail_trace', 'user_ns', '_final_vars',
                          '_original_print', '_original_input', 'custom_print', 'custom_input', 's_io',
                          'js_print_handler', 'js_input_handler', 'main',
-                         'turtle_setup_script', 'student_code_to_run',
-                         '_var_name', '_val']:
+                         'turtle_setup_script', 'AwaitInputTransformer', 'AsyncFunctionTransformer',
+                         '_var_name', '_val', 'to_js', 'asyncio', 'student_code_to_run']:
             continue
-        
         if isinstance(_val, (str, int, float, bool, list, dict, tuple, set)) or _val is None:
             _final_vars[_var_name] = _val
         else:
@@ -1550,17 +883,12 @@ if _error_detail_trace is None:
             except:
                 _final_vars[_var_name] = "<valeur non sérialisable>"
 
-# --- Retour du résultat ---
-# Le résultat de cette expression (un string JSON) sera retourné à JavaScript
-json.dumps({"variables": _final_vars, 
-"error": _error_detail_trace
-})
+json.dumps({"variables": _final_vars, "error": _error_detail_trace})
 `;
 
     console.log("Wrapper de traçage (avec I/O) passé à Pyodide:", tracingWrapper);
     let tracedVariables = {};
     try {
-        // IMPORTANT: On utilise runPythonAsync car notre code est asynchrone (à cause de input)
         let resultJson = await pyodideInstance.runPythonAsync(tracingWrapper);
         if (resultJson) {
             const result = JSON.parse(resultJson);
@@ -1568,103 +896,18 @@ json.dumps({"variables": _final_vars,
                 console.error("Erreur d'exécution Python capturée:", result.error);
                 const friendlyError = formatPythonError(result.error);
                 logToConsole(friendlyError, 'error');
-                return {}; // Retourne un objet vide en cas d'erreur
+                return {};
             }
             tracedVariables = result.variables;
         }
         console.log("Variables tracées pour le défi:", tracedVariables);
-
-    } catch (error) { // Erreur inattendue durant l'exécution du wrapper lui-même
+    } catch (error) {
         console.error("Erreur majeure lors de l'exécution tracée pour le défi (wrapper):", error);
         const friendlyError = formatPythonError(error.message);
         logToConsole(friendlyError, 'error');
         tracedVariables = {};
     }
     return tracedVariables;
-}
-
-
-
-function checkStudentAnswers(correctVariableValues) {
-    console.log("Vérification des réponses de l'élève...");
-    const results = {};
-    const inputs = document.querySelectorAll('.student-answer-input');
-    
-    if (inputs.length === 0 && Object.keys(correctVariableValues).length > 0) {
-        // Cas où il y a des variables attendues, mais pas d'inputs (par ex. si populateChallengeInputs a échoué)
-        // Ou si l'élève n'a pas eu la chance de répondre.
-        // On peut choisir de retourner un message spécial ou un objet vide.
-        console.warn("Aucun champ de réponse trouvé, mais des variables étaient attendues.");
-    }
-
-    // S'il y a des variables attendues, on s'attend à des inputs correspondants
-    Object.keys(correctVariableValues).forEach(varName => {
-        const inputElement = document.getElementById(`var-input-${varName}`);
-        const studentAnswerRaw = inputElement ? inputElement.value : ""; // Valeur vide si l'input n'est pas trouvé
-        const studentAnswerTrimmed = studentAnswerRaw.trim();
-        const correctAnswer = correctVariableValues[varName];
-        
-        let isCorrect = false;
-        let correctAnswerAsString = String(correctAnswer); // Pour l'affichage et la comparaison par défaut
-
-        // Logique de comparaison améliorée par type
-        if (typeof correctAnswer === 'string') {
-            // Pour les chaînes, la casse et les espaces comptent.
-            // Si on veut ignorer la casse : studentAnswerTrimmed.toLowerCase() === correctAnswer.toLowerCase()
-            // Si on veut que les guillemets soient optionnels:
-            // ex: si correctAnswer est "hello", l'élève peut taper hello, "hello", ou 'hello'
-            let normalizedStudentAnswer = studentAnswerTrimmed;
-            if ((studentAnswerTrimmed.startsWith('"') && studentAnswerTrimmed.endsWith('"')) ||
-                (studentAnswerTrimmed.startsWith("'") && studentAnswerTrimmed.endsWith("'"))) {
-                normalizedStudentAnswer = studentAnswerTrimmed.substring(1, studentAnswerTrimmed.length - 1);
-            }
-            isCorrect = normalizedStudentAnswer === correctAnswer;
-        } else if (typeof correctAnswer === 'boolean') {
-            // Pour les booléens, comparer de manière insensible à la casse "True", "true", "False", "false"
-            isCorrect = studentAnswerTrimmed.toLowerCase() === correctAnswerAsString.toLowerCase();
-        } else if (typeof correctAnswer === 'number') {
-            // Pour les nombres, comparer les valeurs numériques
-            // Gérer le cas où la réponse de l'élève n'est pas un nombre valide
-            const studentNumber = parseFloat(studentAnswerTrimmed);
-            if (!isNaN(studentNumber)) {
-                isCorrect = studentNumber === correctAnswer;
-            } else {
-                isCorrect = false; // La réponse n'est pas un nombre, donc incorrecte
-            }
-        } else if (Array.isArray(correctAnswer) || (typeof correctAnswer === 'object' && correctAnswer !== null)) {
-            // Pour les listes, dictionnaires, tuples, etc.
-            // L'élève doit entrer une représentation Python valide. Ex: [1, 2], {"a": 1}
-            // Comparer la représentation chaîne peut être une approximation, mais Python `eval` est risqué.
-            // Une approche plus sûre serait de parser la réponse de l'élève si possible.
-            // Pour l'instant, on se base sur une correspondance de la représentation chaîne (avec repr() pour la valeur correcte)
-            correctAnswerAsString = reprPythonVal(correctAnswer); // Utilise une fonction pour obtenir une représentation canonique
-            isCorrect = studentAnswerTrimmed === correctAnswerAsString;
-             // Tentative de comparaison plus robuste pour list/dict via JSON (si l'élève tape du JSON valide)
-            try {
-                const studentParsed = JSON.parse(studentAnswerTrimmed.replace(/'/g, '"')); // Tenter de normaliser les apostrophes en guillemets pour JSON
-                if (JSON.stringify(studentParsed) === JSON.stringify(correctAnswer)) {
-                    isCorrect = true;
-                }
-            } catch (e) {
-                // Ignorer l'erreur de parsing, isCorrect reste basé sur la comparaison de chaînes
-            }
-        } else if (correctAnswer === null) {
-            isCorrect = studentAnswerTrimmed.toLowerCase() === 'none' || studentAnswerTrimmed.toLowerCase() === 'null';
-            correctAnswerAsString = 'None';
-        } else { 
-            // Autres types ou cas non gérés, comparaison simple de chaînes
-            isCorrect = studentAnswerTrimmed === correctAnswerAsString;
-        }
-
-        results[varName] = {
-            studentAnswer: studentAnswerTrimmed, // Stocker la réponse nettoyée
-            //correctAnswer: correctAnswerAsString, 
-            isCorrect: isCorrect
-        };
-    });
-
-    console.log("Résultats de la vérification:", results);
-    return results;
 }
 
 /**
@@ -1674,8 +917,6 @@ function checkStudentAnswers(correctVariableValues) {
  */
 function reprPythonVal(value) {
     if (typeof value === 'string') {
-        // Python strings are usually represented with single quotes if they don't contain them,
-        // or double if they do. For simplicity, always use single unless it causes issues.
         if (value.includes("'") && !value.includes('"')) return `"${value}"`;
         return `'${value}'`;
     }
@@ -1691,25 +932,46 @@ function reprPythonVal(value) {
     return String(value);
 }
 
+/**
+ * Bascule entre le thème clair et sombre.
+ * Gère Bootstrap, CodeMirror et l'icône du bouton.
+ */
+function toggleTheme() {
+    const html = document.documentElement;
+    const currentTheme = html.getAttribute('data-bs-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    // 1. Appliquer au document (Bootstrap gère le reste via CSS variables)
+    html.setAttribute('data-bs-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    // 2. Mettre à jour l'icône du bouton
+    const icon = document.getElementById('theme-icon');
+    if (icon) {
+        // Note: Assurez-vous d'avoir <i id="theme-icon" class="..."></i> dans votre HTML
+        icon.className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
 
-function revealCorrectSolution(correctVariableValues) {
-    console.log("Révélation de la solution...");
-    const inputs = document.querySelectorAll('.student-answer-input');
-    inputs.forEach(input => {
-        const varName = input.name;
-        if (correctVariableValues.hasOwnProperty(varName)) {
-            // Utiliser reprPythonVal pour un affichage cohérent avec ce que l'élève pourrait taper pour des types complexes
-            input.value = reprPythonVal(correctVariableValues[varName]);
-            input.classList.remove('is-invalid'); // Enlever potentiel style d'erreur
-            input.classList.add('is-valid');    // Ajouter style de succès/validé
-            input.disabled = true; 
+    // 3. Mettre à jour CodeMirror (Éditeur Python)
+    if (codeEditorInstance) {
+        // Si newTheme est 'light', on utilise 'solarized light' (fond clair)
+        // Si newTheme est 'dark', on utilise 'dracula' (fond sombre)
+        const cmTheme = newTheme === 'light' ? 'solarized light' : 'dracula'; 
+        codeEditorInstance.setOption('theme', cmTheme);
+    }
+
+    // 4. (Optionnel) Forcer le rafraîchissement Mermaid si un diagramme est affiché
+    // Mermaid ne réagit pas toujours dynamiquement aux variables CSS sans re-rendu.
+    const flowchartDiv = document.getElementById('flowchart');
+    if (flowchartDiv && flowchartDiv.querySelector('svg')) {
+        // On relance simplement la génération si le code n'a pas changé
+        const runBtn = document.getElementById('run-code-btn');
+        if (runBtn && !runBtn.disabled) {
+            runBtn.click(); // Solution brutale mais efficace pour redessiner avec les bonnes couleurs
         }
-    });
-    const checkBtn = document.getElementById('check-answers-btn');
-    const showSolBtn = document.getElementById('show-solution-btn');
-    if (checkBtn) checkBtn.disabled = true;
-    if (showSolBtn) showSolBtn.disabled = true;
+    }
 }
+
 // --- Gestion de la Console et des I/O personnalisées ---
 
 /**
@@ -1723,12 +985,11 @@ function logToConsole(message, type = 'output') {
 
     const line = document.createElement('div');
     line.className = type === 'error' ? 'text-danger' : 'text-light';
-    
-    // Crée un nœud de texte pour éviter l'interprétation HTML du message
+
     line.appendChild(document.createTextNode(message));
-    
+
     consoleOutput.appendChild(line);
-    consoleOutput.scrollTop = consoleOutput.scrollHeight; // Auto-scroll
+    consoleOutput.scrollTop = consoleOutput.scrollHeight;
 }
 
 /**
@@ -1739,21 +1000,6 @@ function clearConsole() {
     if (consoleOutput) {
         consoleOutput.innerHTML = '';
     }
-}
-
-// Toggle affichage de la console d'exécution
-const consoleHeader = document.getElementById('execution-console-header');
-const consoleBody = document.getElementById('execution-console-body');
-if (consoleHeader && consoleBody) {
-    consoleHeader.addEventListener('click', function(e) {
-        // Ignore le clic sur le bouton "Effacer la console" pour pas que ça replie la card
-        if (e.target.closest('#clear-console-btn')) return;
-        if (consoleBody.style.display === "none") {
-            consoleBody.style.display = "";
-        } else {
-            consoleBody.style.display = "none";
-        }
-    });
 }
 
 /**
@@ -1775,7 +1021,6 @@ function handlePythonInput(prompt) {
     return new Promise((resolve) => {
         const submitListener = () => {
             const value = inputField.value;
-            // Nettoyer l'événement pour ne pas qu'il se cumule
             submitButton.removeEventListener('click', submitListener);
             inputField.removeEventListener('keydown', enterListener);
             inputModal.hide();
@@ -1790,8 +1035,7 @@ function handlePythonInput(prompt) {
 
         submitButton.addEventListener('click', submitListener);
         inputField.addEventListener('keydown', enterListener);
-        
-        // Mettre le focus sur le champ de saisie une fois le modal affiché
+
         document.getElementById('input-modal').addEventListener('shown.bs.modal', () => {
             inputField.focus();
         }, { once: true });
@@ -1809,10 +1053,10 @@ function formatPythonError(traceback) {
     if (!traceback) return "Une erreur inconnue est survenue.";
 
     const lines = traceback.trim().split('\n');
-    const errorLine = lines[lines.length - 1]; // Ex: "NameError: name 'x' is not defined"
+    const errorLine = lines[lines.length - 1];
 
     const match = errorLine.match(/^(\w+):\s*(.*)$/);
-    if (!match) return traceback; // Si le format est inattendu, on retourne le traceback brut.
+    if (!match) return traceback;
 
     const errorType = match[1];
     const errorMessage = match[2];
@@ -1843,3 +1087,606 @@ function formatPythonError(traceback) {
 
     return `Erreur détectée : ${errorLine}\n\n💡 Piste : ${hint}`;
 }
+
+/**********************************************************/
+/**********************************************************/
+// --- Point d'entrée principal de l'application ---
+document.addEventListener('DOMContentLoaded', function() {
+
+    // --- Gestion du Thème (Dark/Light) ---
+    const themeToggleBtn = document.getElementById('theme-toggle'); // Assurez-vous que ce bouton existe dans layout.html
+    
+    // Appliquer le thème sauvegardé au chargement
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-bs-theme', savedTheme);
+    
+    // Ajuster l'éditeur CodeMirror au démarrage si on est en mode clair
+    // A SUPPRIMER: NE SERT À RIEN (car l'instance n'existe pas encore)
+    /*
+    if (savedTheme === 'light' && codeEditorInstance) {
+        codeEditorInstance.setOption('theme', 'default');
+    }
+    */
+    
+    // Ajuster l'icône au démarrage
+    const themeIcon = document.getElementById('theme-icon');
+    if (themeIcon) {
+        themeIcon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
+    }
+
+    // --- Initialisation de l'éditeur CodeMirror ---
+
+    // Définir le thème AVANT l'initialisation
+    const initialCmTheme = savedTheme === 'light' ? 'solarized light' : 'dracula';
+
+    codeEditorInstance = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+        mode: 'python',
+        theme: initialCmTheme, // <--- Utiliser la variable ici au lieu de 'dracula' en dur
+        lineNumbers: true,
+        firstLineNumber: 0,
+        indentUnit: 4,
+        tabSize: 4,
+        indentWithTabs: false,
+        lineWrapping: true,
+        readOnly: !isEditorEditable // Initialement non éditable
+
+    });
+
+    // --- Initialisation des variables DOM globales ---
+    difficultyGlobalSelect = document.getElementById('difficulty-level-global');
+    numLinesGlobalSelect = document.getElementById('num-lines-global');
+    numTotalVariablesGlobalSelect = document.getElementById('num-total-variables-global');
+    advancedModeCheckbox = document.getElementById('advanced-mode');
+    challengeVariablesContainer = document.getElementById('variables-container');
+    checkAnswersButton = document.getElementById('check-answers-btn');
+    showSolutionButton = document.getElementById('show-solution-btn');
+    const feedbackModalElement = document.getElementById('feedback-modal');
+    feedbackModal = feedbackModalElement ? new bootstrap.Modal(feedbackModalElement) : null;
+
+    // --- Initialisation des boutons de la barre d'outils de l'éditeur ---
+    const toggleBtn = document.getElementById('toggle-editable-btn');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => setEditorEditable(!isEditorEditable));
+    }
+
+    const downloadBtn = document.getElementById('download-code-btn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', () => {
+            if (!codeEditorInstance) return;
+            const code = codeEditorInstance.getValue();
+            const blob = new Blob([code], {type: "text/x-python"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const now = new Date();
+            const yyyy = now.getFullYear().toString();
+            const yy = yyyy[2] + yyyy[3];
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            a.download = `mon_code_${dd}${mm}${yy}.py`;
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 0);
+        });
+    }
+
+    const openFileBtn = document.getElementById('open-file-btn');
+    const fileInput = document.getElementById('file-input');
+    if (openFileBtn && fileInput) {
+        openFileBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file && file.name.endsWith('.py')) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    if (codeEditorInstance) {
+                        lastDiagramAstDump = "";
+                        document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Nouveau fichier chargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
+                        if (typeof resetChallengeInputs === 'function') {
+                            resetChallengeInputs(challengeVariablesContainer);
+                        }
+                        document.getElementById('check-answers-btn').disabled = true;
+                        document.getElementById('show-solution-btn').disabled = true;
+                        codeEditorInstance.setValue(evt.target.result);
+                        lastLoadedCode = evt.target.result;
+                        setDiagramAndChallengeCardState("default");
+                    }
+                };
+                reader.readAsText(file, "UTF-8");
+            } else {
+                alert("Choisissez un fichier .py UNIQUEMENT");
+            }
+            fileInput.value = "";
+        });
+    }
+
+    const shareBtn = document.getElementById('share-code-btn');
+    if (shareBtn) {
+        shareBtn.addEventListener('click', async () => {
+            if (!codeEditorInstance) return;
+            const code = codeEditorInstance.getValue();
+            try {
+                await navigator.clipboard.writeText(code);
+                shareBtn.classList.add('btn-success');
+                setTimeout(() => shareBtn.classList.remove('btn-success'), 1000);
+            } catch (err) {
+                alert("Impossible de copier dans le presse-papier.");
+            }
+        });
+    }
+
+    const reloadBtn = document.getElementById("reload-code-btn");
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', () => {
+            if (lastLoadedCode && codeEditorInstance) {
+                lastDiagramAstDump = "";
+                document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Code rechargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
+                if (typeof resetChallengeInputs === 'function') {
+                    resetChallengeInputs(challengeVariablesContainer);
+                }
+                document.getElementById('check-answers-btn').disabled = true;
+                document.getElementById('show-solution-btn').disabled = true;
+                codeEditorInstance.setValue(lastLoadedCode);
+                setDiagramAndChallengeCardState("default");
+                console.log("Code rechargé depuis la dernière sauvegarde. Diagramme invalidé.");
+            }
+        });
+    }
+
+    // --- Gestionnaire pour "Générer un Code Aléatoire" ---
+    const generateCodeButton = document.getElementById('generate-code-btn');
+    if (generateCodeButton) {
+        generateCodeButton.addEventListener('click', function() {
+            const getChecked = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
+            const getSelectVal = (id, defaultValIfNotFound = 0, typeIfVarCount = null) => {
+                const sel = document.getElementById(id);
+                if (typeIfVarCount) {
+                    const typeCheckbox = document.getElementById(`var-${typeIfVarCount}`);
+                    if (!typeCheckbox || !typeCheckbox.checked || !sel || sel.style.display === 'none') {
+                        return 0;
+                    }
+                }
+                return sel ? parseInt(sel.value) : defaultValIfNotFound;
+            };
+            const generationOptions = {
+                var_int_count: getSelectVal('var-int-count', 0, 'int'),
+                var_float_count: getSelectVal('var-float-count', 0, 'float'),
+                var_str_count: getSelectVal('var-str-count', 0, 'str'),
+                var_list_count: getSelectVal('var-list-count', 0, 'list'),
+                var_bool_count: getSelectVal('var-bool-count', 0, 'bool'),
+                op_plus_minus: getChecked('op-plus-minus'),
+                op_mult_div_pow: getChecked('op-mult-div-pow'),
+                op_modulo_floor: getChecked('op-modulo-floor'),
+                op_and: getChecked('op-and'),
+                op_or: getChecked('op-or'),
+                op_not: getChecked('op-not'),
+                op_slice_ab: getChecked('op-slice-ab'),
+                op_slice_abs: getChecked('op-slice-abs'),
+                main_conditions: getChecked('frame-conditions'),
+                cond_if: getChecked('cond-if'),
+                cond_if_else: getChecked('cond-if-else'),
+                cond_if_elif: getChecked('cond-if-elif'),
+                cond_if_elif_else: getChecked('cond-if-elif-else'),
+                cond_if_if: getChecked('cond-if-if'),
+                cond_if_if_if: getChecked('cond-if-if-if'),
+                main_loops: getChecked('frame-loops'),
+                loop_for_range: getChecked('loop-for-range'),
+                loop_for_list: getChecked('loop-for-list'),
+                loop_for_str: getChecked('loop-for-str'),
+                loop_while: getChecked('loop-while'),
+                loop_nested_for2: getChecked('loop-nested-for2'),
+                loop_nested_for3: getChecked('loop-nested-for3'),
+                loop_while_op: getChecked('loop-while-op'),
+                loop_range_ab: getChecked('loop-range-ab'),
+                loop_range_abs: getChecked('loop-range-abs'),
+                main_functions: getChecked('frame-functions'),
+                func_def_simple: getChecked('func-def-simple'),
+                func_def_a: getChecked('func-def-a'),
+                builtin_print: getChecked('builtin-print'),
+                builtin_input: getChecked('builtin-input'),
+                builtin_len: getChecked('builtin-len'),
+                func_return: getChecked('func-return'),
+                builtin_isinstance: getChecked('builtin-isinstance'),
+                builtin_chr: getChecked('builtin-chr'),
+                builtin_ord: getChecked('builtin-ord'),
+                builtin_min: getChecked('builtin-min'),
+                builtin_max: getChecked('builtin-max'),
+                builtin_sum: getChecked('builtin-sum'),
+                func_def_ab: getChecked('func-def-ab'),
+                func_op_list: getChecked('func-op-list'),
+                func_op_str: getChecked('func-op-str'),
+                difficultyLevelGlobal: parseInt(difficultyGlobalSelect.value),
+                numLinesGlobal: parseInt(numLinesGlobalSelect.value),
+                numTotalVariablesGlobal: parseInt(numTotalVariablesGlobalSelect.value)
+            };
+            console.log("Options de génération finales pour code-generator:", generationOptions);
+
+            var newGeneratedCode = "";
+            if (typeof generateRandomPythonCode === 'function') {
+                newGeneratedCode = generateRandomPythonCode(generationOptions);
+            } else {
+                console.warn("generateRandomPythonCode n'est pas définie.");
+                newGeneratedCode = "# Erreur: Le générateur de code aléatoire n'est pas disponible.";
+            }
+
+            lastDiagramAstDump = "";
+            if(codeEditorInstance) codeEditorInstance.setValue(newGeneratedCode);
+            memorizeLoadedCode(newGeneratedCode);
+            setDiagramAndChallengeCardState("default");
+            
+            // NOUVEL APPEL DE LOG: On journalise le code qui vient d'être généré.
+            if (typeof logGeneratedCode === 'function') {
+                const difficulty = parseInt(difficultyGlobalSelect.value, 10);
+                logGeneratedCode(newGeneratedCode, difficulty);
+            }
+
+            var flowchartDisplayArea = document.getElementById('flowchart');
+            if (flowchartDisplayArea) flowchartDisplayArea.innerHTML = '<p class="text-center text-muted mt-3">Nouveau code généré. Cliquez sur "Lancer..."</p>';
+
+            resetChallengeInputs(challengeVariablesContainer);
+            if(checkAnswersButton) checkAnswersButton.disabled = true;
+            if(showSolutionButton) showSolutionButton.disabled = true;
+            updateGlobalConfigSelectors();
+        });
+    } else {
+        console.warn("Bouton 'generate-code-btn' non trouvé.");
+    }
+
+    const predefinedExamplesList = document.getElementById('predefined-examples-list');
+    if (predefinedExamplesList) {
+        predefinedExamplesList.querySelectorAll('a[data-example-index]').forEach(link => {
+            link.addEventListener('click', function() {
+                lastDiagramAstDump = "";
+                console.log("chargement du code par ailleurs... on va mémoriser et invalider le diagramme");
+                if (codeEditorInstance) memorizeLoadedCode(codeEditorInstance.getValue());
+            });
+        });
+    }
+
+
+    const loadPredefinedCodeBtn = document.getElementById('load-predefined-code-btn');
+
+    if (predefinedExamplesList && typeof PREDEFINED_EXAMPLES !== 'undefined' && PREDEFINED_EXAMPLES.length > 0) {
+        PREDEFINED_EXAMPLES.forEach((example, index) => {
+            const listItem = document.createElement('li');
+            const link = document.createElement('a');
+            link.className = 'dropdown-item';
+            link.href = '#';
+            link.textContent = example.name;
+            link.dataset.exampleIndex = index;
+
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const exampleIndex = parseInt(this.dataset.exampleIndex);
+                const selectedExample = PREDEFINED_EXAMPLES[exampleIndex];
+                if (selectedExample && codeEditorInstance) {
+                    
+                    if (typeof logLoadExample === 'function') {
+                        logLoadExample(selectedExample.name);
+                    }
+                    lastDiagramAstDump = "";
+                    codeEditorInstance.setValue(selectedExample.code);
+                    memorizeLoadedCode(selectedExample.code);
+                    setDiagramAndChallengeCardState("default");
+                    console.log(`Exemple chargé et mémorisé: ${selectedExample.name}. Diagramme invalidé.`);
+                    if (typeof resetChallengeInputs === 'function') {
+                        resetChallengeInputs(challengeVariablesContainer);
+                    }
+                    document.getElementById('check-answers-btn').disabled = true;
+                    document.getElementById('show-solution-btn').disabled = true;
+                    document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Code chargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
+                }
+            });
+            listItem.appendChild(link);
+            predefinedExamplesList.appendChild(listItem);
+        });
+    } else if (loadPredefinedCodeBtn) {
+        loadPredefinedCodeBtn.disabled = true;
+        const noExamplesItem = document.createElement('li');
+        noExamplesItem.innerHTML = '<span class="dropdown-item disabled">Aucun exemple disponible</span>';
+        if (predefinedExamplesList) predefinedExamplesList.appendChild(noExamplesItem);
+        console.warn("PREDEFINED_EXAMPLES n'est pas défini ou est vide. Le chargement d'exemples est désactivé.");
+    }
+
+
+    const varTypeCheckboxes = document.querySelectorAll('.var-type-checkbox');
+    varTypeCheckboxes.forEach(checkbox => {
+        const varType = checkbox.id.replace('var-', '');
+        const targetSelectId = checkbox.dataset.targetSelect;
+        if (targetSelectId && VAR_COUNT_LIMITS[varType]) {
+            const selectElement = document.getElementById(targetSelectId);
+            const limits = VAR_COUNT_LIMITS[varType];
+            if (selectElement) {
+                populateSelectWithOptions(selectElement, limits.min, limits.max, limits.min);
+                const updateVarCountSelectVisibility = () => {
+                    selectElement.style.display = checkbox.checked ? 'inline-block' : 'none';
+                    if (!checkbox.checked) selectElement.value = limits.min;
+                    updateGlobalConfigSelectors();
+                    handleVisualInterdependencies();
+                };
+                checkbox.removeEventListener('change', updateVarCountSelectVisibility);
+                checkbox.addEventListener('change', updateVarCountSelectVisibility);
+                updateVarCountSelectVisibility();
+            }
+        }
+    });
+
+   
+
+    if (advancedModeCheckbox) {
+        advancedModeCheckbox.addEventListener('change', function() {
+            const isAdvanced = this.checked;
+            addAdvancedOperationOptionsIfNeeded(isAdvanced);
+            const condContainer = document.querySelector('#conditions-options-container > .d-flex.flex-column.gap-1'); if (condContainer) addAdvancedConditionOptionsIfNeeded(condContainer, isAdvanced);
+            const loopContainer = document.querySelector('#loops-options-container > .d-flex.flex-column.gap-1'); if (loopContainer) addAdvancedLoopOptionsIfNeeded(loopContainer, isAdvanced);
+            const funcBaseOptsContainer = document.querySelector('#functions-options-container > .d-flex.flex-column.gap-1'); if (funcBaseOptsContainer) addAdvancedFunctionOptionsIfNeeded(funcBaseOptsContainer, isAdvanced);
+            const funcBuiltinsCheckbox = document.getElementById('func-builtins'); const builtinsOptionsWrapper = document.getElementById('func-builtins-options-wrapper');
+            if (funcBuiltinsCheckbox && funcBuiltinsCheckbox.checked && builtinsOptionsWrapper) populateBuiltinOptionsColumns(builtinsOptionsWrapper);
+            updateGlobalConfigSelectors(); handleVisualInterdependencies();
+        });
+    }
+
+    const syntaxConfigArea = document.querySelector('.card-body .row.g-2.flex-wrap.align-items-start');
+    if (syntaxConfigArea) {
+        syntaxConfigArea.addEventListener('click', function(event) {
+            if (event.target.matches('input[type="checkbox"], label, select')) {
+                setTimeout(() => {
+                    updateGlobalConfigSelectors();
+                    handleVisualInterdependencies();
+                }, 50);
+            }
+        });
+    }
+
+    if (advancedModeCheckbox) {
+        advancedModeCheckbox.addEventListener('change', () => {
+            const isAdvanced = advancedModeCheckbox.checked;
+            addAdvancedOperationOptionsIfNeeded(isAdvanced);
+            const condContainer = document.querySelector('#conditions-options-container > .d-flex.flex-column.gap-1'); if (condContainer) addAdvancedConditionOptionsIfNeeded(condContainer, isAdvanced);
+            const loopContainer = document.querySelector('#loops-options-container > .d-flex.flex-column.gap-1'); if (loopContainer) addAdvancedLoopOptionsIfNeeded(loopContainer, isAdvanced);
+            const funcBaseOptsContainer = document.querySelector('#functions-options-container > .d-flex.flex-column.gap-1'); if (funcBaseOptsContainer) addAdvancedFunctionOptionsIfNeeded(funcBaseOptsContainer, isAdvanced);
+            setTimeout(() => {
+                updateGlobalConfigSelectors();
+                handleVisualInterdependencies();
+            }, 100);
+        });
+    }
+
+    if (codeEditorInstance) {
+        codeEditorInstance.on('change', async function() {
+            if (!pyodide) return;
+            if (!lastDiagramAstDump) {
+                setDiagramAndChallengeCardState("default");
+                return;
+            }
+            const currentCode = codeEditorInstance.getValue();
+            const currentAstDump = await getAstDumpFromCode(currentCode);
+            if (!currentAstDump) {
+                setDiagramAndChallengeCardState("outdated");
+                return;
+            }
+            if (currentAstDump !== lastDiagramAstDump) {
+                setDiagramAndChallengeCardState("outdated");
+            } else {
+                // Le code est redevenu identique à la dernière version exécutée.
+                setDiagramAndChallengeCardState("default");
+                
+                // --- RESTAURATION DE L'ÉTAT DU DÉFI ---
+                // Si on a des valeurs de la dernière exécution, on restaure l'affichage.
+                if (Object.keys(variableValuesFromExecution).length > 0) {
+                    if (typeof populateChallengeInputs === 'function') {
+                        populateChallengeInputs(variableValuesFromExecution, challengeVariablesContainer);
+                    }
+                    if (checkAnswersButton) checkAnswersButton.disabled = false;
+                    if (showSolutionButton) showSolutionButton.disabled = false;
+                }
+                // --- FIN DE LA RESTAURATION ---
+            }
+        });
+    }
+
+    const runCodeButton = document.getElementById('run-code-btn');
+    if (runCodeButton) {
+        runCodeButton.addEventListener('click', async function() {
+            console.log("Bouton 'Lancer...' cliqué. Processus unifié démarré.");
+            if (!codeEditorInstance) {
+                console.error("L'instance de CodeMirror n'est pas disponible.");
+                alert("Erreur : L'éditeur de code n'est pas initialisé.");
+                return;
+            }
+            // Le code brut de l'éditeur est notre seule source de vérité.
+           const originalCode = codeEditorInstance.getValue();
+            // const currentCode = codeEditorInstance.getValue();
+            // const currentCode = originalCode.replace(/^\s*#.*$/gm, '').trim(); // Enlève les commentaires et espaces inutiles
+             
+             // 1. APPEL UNIFIÉ :
+            // Un seul appel asynchrone pour obtenir le diagramme, le code normalisé, et le dump de l'AST.
+            let processingResults;
+            try {
+                if (typeof triggerFlowchartUpdate === 'function') {
+                    // On s'attend à ce que triggerFlowchartUpdate retourne un objet :
+                    // { mermaid: "...", canonicalCode: "...", ast_dump: "..." }
+                    processingResults = await triggerFlowchartUpdate();
+                } else {
+                    throw new Error("La fonction triggerFlowchartUpdate n'est pas définie.");
+                }
+            } catch (e) {
+                console.error("Erreur lors de la mise à jour du diagramme de flux:", e);
+                alert("Erreur : Impossible de mettre à jour le diagramme de flux. Veuillez vérifier la console pour plus de détails.");
+                return; // Arrêter le processus en cas d'échec critique.
+            }
+
+            // 2. JOURNALISATION INTELLIGENTE :
+            // On ne journalise que si le code a structurellement changé.
+            if (processingResults && processingResults.canonicalCode) {
+                const canonicalCode = processingResults.canonicalCode;
+                
+                if (canonicalCode !== lastLoggedCanonicalCode) {
+                    console.log("Changement structurel détecté. Journalisation des deux versions du code.");
+                    
+                    // On récupère la difficulté au moment de l'exécution.
+                    const difficulty = parseInt(difficultyGlobalSelect.value, 10);
+
+                    // APPEL MODIFIÉ: On utilise la nouvelle fonction avec tous les arguments.
+                    if (typeof logExecutedCode === 'function') {
+                        try {
+                            // CORRECTION : On attend le résultat de la journalisation.
+                            const logResult = await logExecutedCode(originalCode, canonicalCode, difficulty); 
+                            if (logResult && logResult.code_id) {
+                                // On stocke l'ID du code qui vient d'être créé.
+                                currentChallengeCodeId = logResult.code_id;
+                                console.log(`Défi initialisé avec code_id: ${currentChallengeCodeId}`);
+                            }
+                        } catch (e) {
+                            console.error("Erreur lors de la journalisation du code exécuté:", e);
+                        }
+                    }
+                    
+                    // Mettre à jour la référence pour éviter les logs redondants.
+                    lastLoggedCanonicalCode = canonicalCode;
+                } else {
+                    console.log("Aucun changement structurel. Journalisation ignorée.");
+                }
+            }
+
+            // 3. MISE À JOUR DE L'AST POUR LA SYNCHRONISATION DE L'UI :
+            // CORRECTION : On supprime l'appel redondant et on utilise le dump AST
+            // déjà récupéré lors de l'appel unifié. C'est la clé de la fiabilité.
+            if (processingResults && processingResults.ast_dump) {
+                lastDiagramAstDump = processingResults.ast_dump;
+                console.log("lastDiagramAstDump mis à jour via le processus unifié.");
+            } else {
+                // Si le traitement a échoué ou n'a pas retourné de dump, on réinitialise la référence.
+                lastDiagramAstDump = "";
+                console.warn("Impossible de mettre à jour le dump AST de référence via le processus unifié.");
+            }
+            
+            // 4. EXÉCUTION DU DÉFI :
+            // Mettre l'UI en état "par défaut" avant de lancer le défi.
+            setDiagramAndChallengeCardState("default");
+            try {
+                variableValuesFromExecution = {};
+                if (typeof pyodide !== 'undefined' && pyodide) {
+                     // On exécute le code original de l'éditeur pour le défi.
+                     variableValuesFromExecution = await runAndTraceCodeForChallenge(originalCode, pyodide);
+                } else {
+                    console.warn("Pyodide n'est pas encore prêt pour exécuter le code du défi.");
+                    alert("Le moteur Python n'est pas encore prêt. Veuillez patienter.");
+                    if (checkAnswersButton) checkAnswersButton.disabled = true;
+                    if (showSolutionButton) showSolutionButton.disabled = true;
+                    return;
+                }
+                
+                // Mettre à jour l'interface du défi avec les résultats.
+                if (typeof populateChallengeInputs === 'function') {
+                    populateChallengeInputs(variableValuesFromExecution, challengeVariablesContainer);
+                }
+                const hasVariables = Object.keys(variableValuesFromExecution).length > 0;
+                if (checkAnswersButton) checkAnswersButton.disabled = !hasVariables;
+                if (showSolutionButton) showSolutionButton.disabled = !hasVariables;
+
+            } catch (error) {
+                console.error("Erreur lors de l'exécution du code pour le défi:", error);
+                const container = document.getElementById('variables-container');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="col-12 text-center text-danger">
+                            <p>Erreur lors de l'exécution du code Python pour le défi :<br>
+                            <code>${error.message}</code></p>
+                        </div>`;
+                }
+                if (checkAnswersButton) checkAnswersButton.disabled = true;
+                if (showSolutionButton) showSolutionButton.disabled = true;
+            }
+        });
+    }
+
+    if (checkAnswersButton) {
+        checkAnswersButton.addEventListener('click', function() {
+            console.log("Bouton 'Vérifier les réponses' cliqué.");
+            if (typeof checkStudentAnswers === 'function' 
+                && typeof buildFeedbackModalContent === 'function' && feedbackModal) {
+                const results = checkStudentAnswers(variableValuesFromExecution);
+
+                if (typeof logVerifyAnswers === 'function') {
+                if (currentChallengeCodeId) {
+                    logVerifyAnswers(results, currentChallengeCodeId);
+                } else {
+                    console.warn("Impossible de journaliser la vérification : aucun code_id de défi n'est disponible.");
+                }
+            }
+                const feedbackData = buildFeedbackModalContent(results);
+                const feedbackContentElement = document.getElementById('feedback-modal-content');
+                if (feedbackContentElement) {
+                    feedbackContentElement.innerHTML = feedbackData.content;
+                }
+                feedbackModal.show();
+            } else {
+                console.error("Les fonctions de validation ou le modal ne sont pas définis. Assurez-vous que validation.js est chargé avant main.js.");
+            }
+        });
+    }
+
+    if (showSolutionButton) {
+        showSolutionButton.addEventListener('click', function() {
+            console.log("Bouton 'Révéler la solution' cliqué.");
+
+            // CORRECTION : On utilise l'ID du défi en cours.
+            if (typeof logRevealSolution === 'function') {
+                if (currentChallengeCodeId) {
+                    logRevealSolution(currentChallengeCodeId);
+                } else {
+                    console.warn("Impossible de journaliser la révélation : aucun code_id de défi n'est disponible.");
+                }
+            }
+
+            if (typeof revealCorrectSolution === 'function') {
+                revealCorrectSolution(variableValuesFromExecution);
+            } else {
+                console.warn("La fonction revealCorrectSolution n'est pas définie.");
+            }
+        });
+    }
+
+    const clearConsoleBtn = document.getElementById('clear-console-btn');
+    if (clearConsoleBtn) {
+        clearConsoleBtn.addEventListener('click', clearConsole);
+    }
+    
+    const consoleHeader = document.getElementById('execution-console-header');
+    const consoleBody = document.getElementById('execution-console-body');
+    if (consoleHeader && consoleBody) {
+        consoleHeader.addEventListener('click', function(e) {
+            if (e.target.closest('#clear-console-btn')) return;
+            if (consoleBody.style.display === "none") {
+                consoleBody.style.display = "";
+            } else {
+                consoleBody.style.display = "none";
+            }
+        });
+    }
+
+    const clearTurtleBtn = document.getElementById('clear-turtle-canvas-btn');
+    if (clearTurtleBtn) {
+        clearTurtleBtn.addEventListener('click', () => {
+            const canvas = document.getElementById('turtle-canvas');
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        });
+    }
+
+    // --- Initialisation sécurisée à la fin ---
+    initializeDynamicSyntaxOptions();
+    updateGlobalConfigSelectors();
+    handleVisualInterdependencies();
+    initializeUI();
+});

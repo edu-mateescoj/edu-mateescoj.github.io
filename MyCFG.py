@@ -3,7 +3,11 @@ from typing import List, Dict, Set, Tuple, Optional
 
 class ControlFlowGraph:
     def __init__(self, code: str):
-        self.tree = ast.parse(code)
+        try:
+            self.tree = ast.parse(code)
+        except SyntaxError as e:
+            self.syntax_error = e
+            self.tree = None
         self.nodes: List[Tuple[str, str]] = [] # Liste des tuples (node_id, label)
         self.edges: Set[Tuple[str, str, str]] = set() # Ensemble des tuples (from_node, to_node, label)
         self.node_counter = 0 # Compteur pour générer des ID de nœuds uniques
@@ -31,6 +35,28 @@ class ControlFlowGraph:
         # Ex: "my_string" -> (ast.Constant, "chaîne")
         self.variable_assignments: Dict[str, Tuple[type, Any]] = {}
 
+    def process_and_get_results(self) -> dict:
+        """
+        Méthode centrale qui génère le diagramme ET le code normalisé.
+        """
+        if self.tree is None:
+            return {
+                "mermaid": "graph TD\n    error[Code syntaxiquement invalide]",
+                "canonical_code": f"# Erreur de syntaxe:\n# {getattr(self, 'syntax_error', 'Erreur inconnue')}",
+                "error": str(getattr(self, 'syntax_error', 'Erreur inconnue'))
+            }
+
+        self.visit(self.tree, None)
+        mermaid_string = self.to_mermaid()
+        canonical_code_string = ast.unparse(self.tree)
+
+        return {
+            "mermaid": mermaid_string,
+            "canonical_code": canonical_code_string,
+            "ast_dump": ast.dump(self.tree),
+            "error": None
+        }
+        
     def get_node_id(self) -> str:
         """Génère un nouvel ID de nœud unique et l'ajoute à la portée de fonction actuelle si applicable."""
         self.node_counter += 1
@@ -361,7 +387,7 @@ class ControlFlowGraph:
         if not skip_first_check:
             # 1. Première Décision: Y a-t-il des éléments à traiter ?
             # Utiliser une formulation neutre pour le type d'itérable.
-            entry_decision_label = f"{iterable_kind_desc.capitalize()} '{iterable_display_name}'\
+            entry_decision_label = f"{iterable_kind_desc.capitalize()} {iterable_display_name}\
                 <br>contient des {elements_type_desc_raw}s ?" # Garder un pluriel simple avec 's'
             entry_decision_id = self.add_node(entry_decision_label, node_type="Decision")
             self.add_edge(parent_id, entry_decision_id)
@@ -370,11 +396,11 @@ class ControlFlowGraph:
         # 2. Initialisation de la variable locale au premier élément
         # Utiliser les articles pour les labels d'initialisation et de mise à jour
         if article_indefini_element == "un":
-            init_var_label = f"{iterator_variable_str} ← Le premier {elements_type_desc_raw}<br>de '{iterable_display_name}'"
+            init_var_label = f"{iterator_variable_str} ← Le premier {elements_type_desc_raw}<br>de {iterable_display_name}"
         elif article_indefini_element == "une":
-            init_var_label = f"{iterator_variable_str} ← La première {elements_type_desc_raw}<br>de '{iterable_display_name}'"
+            init_var_label = f"{iterator_variable_str} ← La première {elements_type_desc_raw}<br>de {iterable_display_name}"
         else: # "des" ou autre
-            init_var_label = f"{iterator_variable_str} ← Les premier(es) {elements_type_desc_raw}<br>de '{iterable_display_name}'"
+            init_var_label = f"{iterator_variable_str} ← Les premier(es) {elements_type_desc_raw}<br>de {iterable_display_name}"
         init_var_id = self.add_node(init_var_label, node_type="Process")
 
         if entry_decision_id: # Si la première décision existe (on ne l'a pas sautée)
@@ -383,15 +409,15 @@ class ControlFlowGraph:
             self.add_edge(parent_id, init_var_id)
 
         # Nœuds pour le re-test et la mise à jour de l'itérateur
-        retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans '{iterable_display_name}' ?"
+        retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans {iterable_display_name} ?"
         retest_decision_id = self.add_node(retest_decision_label, node_type="Decision")
         
         if article_indefini_element == "un":
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivant<br>de '{iterable_display_name}'"
+            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivant<br>de {iterable_display_name}"
         elif article_indefini_element == "une":
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivante<br>de '{iterable_display_name}'"
+            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivante<br>de {iterable_display_name}"
         else: # "des" ou autre
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw}s suivants<br>de '{iterable_display_name}'"
+            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw}s suivants<br>de {iterable_display_name}"
         next_var_id = self.add_node(next_var_label, node_type="Process")
 
         # --- Connexions et Flux ---
@@ -633,7 +659,7 @@ class ControlFlowGraph:
     def visit_While(self, node: ast.While, parent_id: str) -> List[str]: 
         """Visite une boucle 'while' AST."""
         condition_text = ast.unparse(node.test).replace('"', '"')
-        while_decision_id = self.add_node(f"While {condition_text}", node_type="Decision")
+        while_decision_id = self.add_node(f"{condition_text}", node_type="Decision")
         self.add_edge(parent_id, while_decision_id)
         
         # La branche "False" (terminaison normale) part de while_decision_id.
@@ -1211,3 +1237,34 @@ class ControlFlowGraph:
         elif node_type == "Jump": shape_open, shape_close = "((", "))" # Stade (comme StartEnd).
         elif node_type == "IoOperation": shape_open, shape_close = "[/", "/]" # Parallélogramme pour I/O.
         return shape_open, shape_close
+
+# FIN DU FICHIER EN MODE MODULE
+
+
+'''
+############### Choisir le code à tester ###############
+import exemples
+selected_code = exemples.defif
+########################################################
+
+# --- Génération et Affichage ---
+print(f"--- Code Python analysé ---")
+print(selected_code)
+
+cfg = ControlFlowGraph(selected_code)
+# Lancer la visite à partir de la racine de l'AST (le module)
+cfg.visit(cfg.tree, None) # Le parent initial est None
+print(ast.dump(cfg.tree))
+print("\n--- Mermaid Généré ---")
+print(cfg.to_mermaid())
+
+# Optionnel : Afficher les noeuds et arêtes pour le débogage
+print("\n--- Noeuds (ID, Label) ---")
+for n in cfg.nodes:
+     print(n)
+print("\n--- Arêtes (From, To, Label) ---")
+for e in sorted(list(cfg.edges)): # Trié pour la lisibilité
+     print(e)
+print("\n--- Noeuds Terminaux ---")
+print(cfg.terminal_nodes)
+'''
