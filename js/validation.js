@@ -69,27 +69,15 @@ function populateChallengeInputs(correctVariableValues, container) {
 /**
  * Réinitialise la section "Défi" à son état par défaut.
  * @param {HTMLElement} container - L'élément conteneur des inputs à réinitialiser.
-<<<<<<< HEAD
- */
-function resetChallengeInputs(container) {
-=======
  * @param {string|null} [reason=null] - La raison optionnelle de la réinitialisation ('outdated' ou null).
  */
 function resetChallengeInputs(container, reason = null) {
->>>>>>> pyodide_layout_juin25
     if (!container) {
         console.error("Le conteneur pour les variables du défi est introuvable.");
         return;
     }
     container.innerHTML = ''; // Vider le conteneur pour toute nouvelle population
 
-<<<<<<< HEAD
-    // Message par défaut
-    container.innerHTML = `
-        <div class="col-12 text-center text-muted">
-            <p><i class="fas fa-code me-2"></i>Lancer le diagramme et les défis pour voir les variables...</p>
-        </div>`;
-=======
     let message = "";
     if (reason === "outdated") {
         // Message spécifique si le code est périmé
@@ -105,7 +93,6 @@ function resetChallengeInputs(container, reason = null) {
         </div>`;
     }
     container.innerHTML = message;
->>>>>>> pyodide_layout_juin25
 }
 
 /**
