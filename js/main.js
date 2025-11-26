@@ -49,7 +49,11 @@ const loopsOptionsHTML_Base = `
     </div>`;
 const functionsOptionsHTML_Base = `
     <div class="d-flex flex-column gap-1">
+<<<<<<< HEAD
         <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-simple"><label class="form-check-label small" for="func-def-simple">def f()</label></div>
+=======
+        <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-simple"><label class="form-check-label small" for="func-def-simple">def</label></div>
+>>>>>>> pyodide_layout_juin25
         <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-def-a"><label class="form-check-label small" for="func-def-a">def f(a)</label></div>
         <div class="form-check form-check-inline"><input class="form-check-input" type="checkbox" id="func-return"><label class="form-check-label small" for="func-return">return</label></div>
         <div class="form-check form-check-inline" id="func-builtins-main-container"></div>
@@ -62,6 +66,11 @@ let isEditorEditable = false;
 var codeEditorInstance;
 let variableValuesFromExecution = {}; // Pour stocker les valeurs des variables après l'exécution du code
 let lastDiagramAstDump = ""; // Pour la synchronisation diagramme/code
+<<<<<<< HEAD
+=======
+let lastLoggedCanonicalCode = ""; // Stocke le dernier code normalisé qui a été journalisé
+let currentChallengeCodeId = null; // Pour stocker l'ID du code de défi actuel
+>>>>>>> pyodide_layout_juin25
 
 // --- Variables DOM globales (déclarées ici pour être accessibles partout) ---
 let difficultyGlobalSelect;
@@ -630,8 +639,9 @@ async function getAstDumpFromCode(code) {
         const pyScript = `
 import ast
 try:
-    cfg_instance = ControlFlowGraph(user_python_code)
-    result = ast.dump(cfg_instance.tree)
+    # On ne fait que parser, pas besoin de générer le graphe complet ici.
+    tree = ast.parse(user_python_code)
+    result = ast.dump(tree)
 except Exception:
     result = None # Retourne None si le code est syntaxiquement invalide
 result
@@ -651,6 +661,11 @@ result
 function setDiagramAndChallengeCardState(state) {
     const diagramCard = document.getElementById('flowchart')?.closest('.card');
     const challengeCard = document.getElementById('variables-container')?.closest('.card');
+<<<<<<< HEAD
+=======
+    const checkBtn = document.getElementById('check-answers-btn');
+    const showSolBtn = document.getElementById('show-solution-btn');
+>>>>>>> pyodide_layout_juin25
 
     [diagramCard, challengeCard].forEach(card => {
         if (!card) return;
@@ -674,6 +689,9 @@ function setDiagramAndChallengeCardState(state) {
         runBtn.classList.remove('btn-danger', 'btn-success');
         if (state === "outdated") {
             runBtn.classList.add('btn-danger');
+            if (checkBtn) checkBtn.disabled = true;
+            if (showSolBtn) showSolBtn.disabled = true;
+            resetChallengeInputs(challengeVariablesContainer, "outdated"); // On passe l'état pour un message personnalisé
         } else {
             runBtn.classList.add('btn-success');
         }
@@ -731,6 +749,7 @@ import pyodide
 from pyodide.ffi import to_js
 import ast
 
+<<<<<<< HEAD
 def extract_function_calls(code):
     try:
         tree = ast.parse(code)
@@ -763,12 +782,60 @@ def extract_function_calls(code):
     except:
         return []
 
+=======
+# --- Redirection des entrées/sorties (I/O) ---
+_original_print = builtins.print
+_original_input = builtins.input
+
+def custom_print(*args, **kwargs):
+    s_io = io.StringIO()
+    kwargs['file'] = s_io
+    _original_print(*args, **kwargs)
+    message = s_io.getvalue()
+    js_print_handler(message)
+
+async def custom_input(prompt=""):
+    response = await js_input_handler(prompt)
+    js_print_handler(str(prompt) + str(response) + '\\n', 'output')
+    return response
+
+builtins.print = custom_print
+builtins.input = custom_input
+
+# --- Moteur d'exécution et transformateurs d'AST ---
+
+user_ns = {} 
+_error_detail_trace = None
+# Variable globale pour stocker les noms des fonctions que nous rendons asynchrones
+_async_function_names = set()
+
+# Transformateur 1: Trouve 'def' et le transforme en 'async def',
+# tout en mémorisant les noms des fonctions transformées.
+class AsyncFunctionTransformer(ast.NodeTransformer):
+    def visit_FunctionDef(self, node):
+        global _async_function_names
+        _async_function_names.add(node.name)
+        # On reconstruit le noeud de fonction en tant que AsyncFunctionDef,
+        # en conservant tous ses attributs (nom, arguments, corps, etc.).
+        self.generic_visit(node) # S'assurer de visiter les enfants d'abord
+        return ast.AsyncFunctionDef(
+            name=node.name,
+            args=node.args,
+            body=node.body,
+            decorator_list=node.decorator_list,
+            returns=node.returns,
+            type_comment=getattr(node, 'type_comment', None)
+        )
+
+# Transformateur 2: 'input()' -> 'await input()'
+>>>>>>> pyodide_layout_juin25
 class AwaitInputTransformer(ast.NodeTransformer):
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id == "input":
             return ast.Await(value=node)
         return self.generic_visit(node)
 
+<<<<<<< HEAD
 _original_print = builtins.print
 _original_input = builtins.input
 user_ns = {}
@@ -790,15 +857,71 @@ async def custom_input(prompt=""):
 builtins.print = custom_print
 builtins.input = custom_input
 
+=======
+# RAPPEL Un appel de fonction de premier niveau est un noeud 'Expr' contenant un noeud 'Call'.
+
+
+# Transformateur 3 utilise visit_Call
+class AwaitCallTransformer(ast.NodeTransformer):
+    def visit_Call(self, node):
+        # D'abord transformer récursivement les sous-nœuds (arguments, mots-clés, fonction cible)
+        self.generic_visit(node)
+
+        # Identification du nom de la fonction appelée
+        func_name = None
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            # Pour obj.methode, on prend .attr; ajustez si vous avez une autre logique
+            func_name = node.func.attr
+
+        # Vérifier si déjà dans un ast.Await (pas de parent direct dans l’AST standard;
+        # ce cas ne se produit que si l’élève a écrit 'await f()' => alors node est value d'un ast.Await)
+        # Ici on protège en ne re-plaçant pas si le parent était déjà un Await lors d'un passage précédent.
+        # Sans parent tracking, on peut au moins éviter un double enveloppement en testant un marqueur.
+        if hasattr(node, '_already_awaited'):
+            return node  # Sécurité (marqueur interne)
+
+        if func_name and func_name in _async_function_names:
+            awaited = ast.Await(value=node)
+            # Marquer pour éviter double traitement si revisité
+            node._already_awaited = True
+            ast.copy_location(awaited, node)
+            ast.fix_missing_locations(awaited)
+            return awaited
+
+        return node
+
+# Fonction 'main' asynchrone MISE À JOUR pour orchestrer les 3 transformations
+>>>>>>> pyodide_layout_juin25
 async def main():
     global _error_detail_trace, user_ns
 
     try:
         from ast import unparse
         tree = ast.parse(student_code_to_run)
+<<<<<<< HEAD
         transformed_tree = AwaitInputTransformer().visit(tree)
         ast.fix_missing_locations(transformed_tree)
         transformed_code_string = unparse(transformed_tree)
+=======
+
+        # ÉTAPE 1: Rendre les fonctions asynchrones ('def' -> 'async def')
+        asyncified_tree = AsyncFunctionTransformer().visit(tree)
+
+        # ÉTAPE 2: Gérer les 'await' pour input()
+        # C'est seulement après que les fonctions sont 'async' qu'on peut y insérer des 'await'.
+        input_awaited_tree = AwaitInputTransformer().visit(asyncified_tree)
+        
+        # ÉTAPE 3: Gérer les 'await' pour les appels aux fonctions maintenant asynchrones
+        final_tree = AwaitCallTransformer().visit(input_awaited_tree)
+
+        ast.fix_missing_locations(final_tree)
+        transformed_code_string = unparse(final_tree)
+
+        # Le code qui sera exécuté contient maintenant 'async def' pour les fonctions
+        # et 'await input()', ce qui est une syntaxe Python valide.
+>>>>>>> pyodide_layout_juin25
         await pyodide.code.eval_code_async(transformed_code_string, globals=user_ns)
 
         function_calls = extract_function_calls(student_code_to_run)
@@ -821,6 +944,12 @@ async def main():
 
 await main()
 
+<<<<<<< HEAD
+=======
+# --- Extraction des résultats pour le Défi (INCHANGÉ) ---
+# j'en rajoute qui ne devraient pas avoir à être filtrées car traumatisé par bug pyodide de persistance de variables dans le namespace
+_final_vars = {}
+>>>>>>> pyodide_layout_juin25
 if _error_detail_trace is None:
     for _var_name, _val in user_ns.items():
         if _var_name.startswith('__') or isinstance(_val, (types.ModuleType, types.FunctionType, type)):
@@ -832,8 +961,8 @@ if _error_detail_trace is None:
                          '_syntax_check_result', '_error_detail_trace', 'user_ns', '_final_vars',
                          '_original_print', '_original_input', 'custom_print', 'custom_input', 's_io',
                          'js_print_handler', 'js_input_handler', 'main',
-                         'turtle_setup_script', 'student_code_to_run',
-                         '_var_name', '_val']:
+                         'turtle_setup_script', 'AwaitInputTransformer', 'AsyncFunctionTransformer',
+                         '_var_name', '_val', 'to_js', 'asyncio', 'student_code_to_run']:
             continue
         if isinstance(_val, (str, int, float, bool, list, dict, tuple, set)) or _val is None:
             _final_vars[_var_name] = _val
@@ -892,7 +1021,49 @@ function reprPythonVal(value) {
     return String(value);
 }
 
+/**
+ * Bascule entre le thème clair et sombre.
+ * Gère Bootstrap, CodeMirror et l'icône du bouton.
+ */
+function toggleTheme() {
+    const html = document.documentElement;
+    const currentTheme = html.getAttribute('data-bs-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    // 1. Appliquer au document (Bootstrap gère le reste via CSS variables)
+    html.setAttribute('data-bs-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    // 2. Mettre à jour l'icône du bouton
+    const icon = document.getElementById('theme-icon');
+    if (icon) {
+        // Note: Assurez-vous d'avoir <i id="theme-icon" class="..."></i> dans votre HTML
+        icon.className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
 
+<<<<<<< HEAD
+=======
+    // 3. Mettre à jour CodeMirror (Éditeur Python)
+    if (codeEditorInstance) {
+        // Si newTheme est 'light', on utilise 'solarized light' (fond clair)
+        // Si newTheme est 'dark', on utilise 'dracula' (fond sombre)
+        const cmTheme = newTheme === 'light' ? 'solarized light' : 'dracula'; 
+        codeEditorInstance.setOption('theme', cmTheme);
+    }
+
+    // 4. (Optionnel) Forcer le rafraîchissement Mermaid si un diagramme est affiché
+    // Mermaid ne réagit pas toujours dynamiquement aux variables CSS sans re-rendu.
+    const flowchartDiv = document.getElementById('flowchart');
+    if (flowchartDiv && flowchartDiv.querySelector('svg')) {
+        // On relance simplement la génération si le code n'a pas changé
+        const runBtn = document.getElementById('run-code-btn');
+        if (runBtn && !runBtn.disabled) {
+            runBtn.click(); // Solution brutale mais efficace pour redessiner avec les bonnes couleurs
+        }
+    }
+}
+
+>>>>>>> pyodide_layout_juin25
 // --- Gestion de la Console et des I/O personnalisées ---
 
 /**
@@ -1014,10 +1185,46 @@ function formatPythonError(traceback) {
 // --- Point d'entrée principal de l'application ---
 document.addEventListener('DOMContentLoaded', function() {
 
+<<<<<<< HEAD
     // --- Initialisation de l'éditeur CodeMirror ---
     codeEditorInstance = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
         mode: 'python',
         theme: 'dracula',
+=======
+    // --- Gestion du Thème (Dark/Light) ---
+    const themeToggleBtn = document.getElementById('theme-toggle'); // Assurez-vous que ce bouton existe dans layout.html
+    
+    // Appliquer le thème sauvegardé au chargement
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-bs-theme', savedTheme);
+    
+    // Ajuster l'éditeur CodeMirror au démarrage si on est en mode clair
+    // A SUPPRIMER: NE SERT À RIEN (car l'instance n'existe pas encore)
+    /*
+    if (savedTheme === 'light' && codeEditorInstance) {
+        codeEditorInstance.setOption('theme', 'default');
+    }
+    */
+    
+    // Ajuster l'icône au démarrage
+    const themeIcon = document.getElementById('theme-icon');
+    if (themeIcon) {
+        themeIcon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
+    }
+
+    // --- Initialisation de l'éditeur CodeMirror ---
+
+    // Définir le thème AVANT l'initialisation
+    const initialCmTheme = savedTheme === 'light' ? 'solarized light' : 'dracula';
+
+    codeEditorInstance = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+        mode: 'python',
+        theme: initialCmTheme, // <--- Utiliser la variable ici au lieu de 'dracula' en dur
+>>>>>>> pyodide_layout_juin25
         lineNumbers: true,
         firstLineNumber: 0,
         indentUnit: 4,
@@ -1212,8 +1419,17 @@ document.addEventListener('DOMContentLoaded', function() {
             if(codeEditorInstance) codeEditorInstance.setValue(newGeneratedCode);
             memorizeLoadedCode(newGeneratedCode);
             setDiagramAndChallengeCardState("default");
+<<<<<<< HEAD
             // CORRECTION: La fonction `codeIsGenerated` n'existe pas. Nous la retirons.
             // codeIsGenerated(newGeneratedCode);
+=======
+            
+            // NOUVEL APPEL DE LOG: On journalise le code qui vient d'être généré.
+            if (typeof logGeneratedCode === 'function') {
+                const difficulty = parseInt(difficultyGlobalSelect.value, 10);
+                logGeneratedCode(newGeneratedCode, difficulty);
+            }
+>>>>>>> pyodide_layout_juin25
 
             var flowchartDisplayArea = document.getElementById('flowchart');
             if (flowchartDisplayArea) flowchartDisplayArea.innerHTML = '<p class="text-center text-muted mt-3">Nouveau code généré. Cliquez sur "Lancer..."</p>';
@@ -1255,6 +1471,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const exampleIndex = parseInt(this.dataset.exampleIndex);
                 const selectedExample = PREDEFINED_EXAMPLES[exampleIndex];
                 if (selectedExample && codeEditorInstance) {
+<<<<<<< HEAD
+=======
+                    
+                    if (typeof logLoadExample === 'function') {
+                        logLoadExample(selectedExample.name);
+                    }
+>>>>>>> pyodide_layout_juin25
                     lastDiagramAstDump = "";
                     codeEditorInstance.setValue(selectedExample.code);
                     memorizeLoadedCode(selectedExample.code);
@@ -1359,7 +1582,23 @@ document.addEventListener('DOMContentLoaded', function() {
             if (currentAstDump !== lastDiagramAstDump) {
                 setDiagramAndChallengeCardState("outdated");
             } else {
+<<<<<<< HEAD
                 setDiagramAndChallengeCardState("default");
+=======
+                // Le code est redevenu identique à la dernière version exécutée.
+                setDiagramAndChallengeCardState("default");
+                
+                // --- RESTAURATION DE L'ÉTAT DU DÉFI ---
+                // Si on a des valeurs de la dernière exécution, on restaure l'affichage.
+                if (Object.keys(variableValuesFromExecution).length > 0) {
+                    if (typeof populateChallengeInputs === 'function') {
+                        populateChallengeInputs(variableValuesFromExecution, challengeVariablesContainer);
+                    }
+                    if (checkAnswersButton) checkAnswersButton.disabled = false;
+                    if (showSolutionButton) showSolutionButton.disabled = false;
+                }
+                // --- FIN DE LA RESTAURATION ---
+>>>>>>> pyodide_layout_juin25
             }
         });
     }
@@ -1367,22 +1606,43 @@ document.addEventListener('DOMContentLoaded', function() {
     const runCodeButton = document.getElementById('run-code-btn');
     if (runCodeButton) {
         runCodeButton.addEventListener('click', async function() {
+<<<<<<< HEAD
             console.log("Bouton 'Lancer le diagramme et les défis' cliqué.");
+=======
+            console.log("Bouton 'Lancer...' cliqué. Processus unifié démarré.");
+>>>>>>> pyodide_layout_juin25
             if (!codeEditorInstance) {
                 console.error("L'instance de CodeMirror n'est pas disponible.");
                 alert("Erreur : L'éditeur de code n'est pas initialisé.");
                 return;
             }
+<<<<<<< HEAD
             const currentCode = codeEditorInstance.getValue();
             try {
                 if (typeof triggerFlowchartUpdate === 'function') {
                     await triggerFlowchartUpdate();
+=======
+            // Le code brut de l'éditeur est notre seule source de vérité.
+           const originalCode = codeEditorInstance.getValue();
+            // const currentCode = codeEditorInstance.getValue();
+            // const currentCode = originalCode.replace(/^\s*#.*$/gm, '').trim(); // Enlève les commentaires et espaces inutiles
+             
+             // 1. APPEL UNIFIÉ :
+            // Un seul appel asynchrone pour obtenir le diagramme, le code normalisé, et le dump de l'AST.
+            let processingResults;
+            try {
+                if (typeof triggerFlowchartUpdate === 'function') {
+                    // On s'attend à ce que triggerFlowchartUpdate retourne un objet :
+                    // { mermaid: "...", canonicalCode: "...", ast_dump: "..." }
+                    processingResults = await triggerFlowchartUpdate();
+>>>>>>> pyodide_layout_juin25
                 } else {
                     throw new Error("La fonction triggerFlowchartUpdate n'est pas définie.");
                 }
             } catch (e) {
                 console.error("Erreur lors de la mise à jour du diagramme de flux:", e);
                 alert("Erreur : Impossible de mettre à jour le diagramme de flux. Veuillez vérifier la console pour plus de détails.");
+<<<<<<< HEAD
                 return;
             }
             try {
@@ -1399,11 +1659,68 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.warn("Impossible de mettre à jour le dump AST de référence:", e);
                 lastDiagramAstDump = "";
             }
+=======
+                return; // Arrêter le processus en cas d'échec critique.
+            }
+
+            // 2. JOURNALISATION INTELLIGENTE :
+            // On ne journalise que si le code a structurellement changé.
+            if (processingResults && processingResults.canonicalCode) {
+                const canonicalCode = processingResults.canonicalCode;
+                
+                if (canonicalCode !== lastLoggedCanonicalCode) {
+                    console.log("Changement structurel détecté. Journalisation des deux versions du code.");
+                    
+                    // On récupère la difficulté au moment de l'exécution.
+                    const difficulty = parseInt(difficultyGlobalSelect.value, 10);
+
+                    // APPEL MODIFIÉ: On utilise la nouvelle fonction avec tous les arguments.
+                    if (typeof logExecutedCode === 'function') {
+                        try {
+                            // CORRECTION : On attend le résultat de la journalisation.
+                            const logResult = await logExecutedCode(originalCode, canonicalCode, difficulty); 
+                            if (logResult && logResult.code_id) {
+                                // On stocke l'ID du code qui vient d'être créé.
+                                currentChallengeCodeId = logResult.code_id;
+                                console.log(`Défi initialisé avec code_id: ${currentChallengeCodeId}`);
+                            }
+                        } catch (e) {
+                            console.error("Erreur lors de la journalisation du code exécuté:", e);
+                        }
+                    }
+                    
+                    // Mettre à jour la référence pour éviter les logs redondants.
+                    lastLoggedCanonicalCode = canonicalCode;
+                } else {
+                    console.log("Aucun changement structurel. Journalisation ignorée.");
+                }
+            }
+
+            // 3. MISE À JOUR DE L'AST POUR LA SYNCHRONISATION DE L'UI :
+            // CORRECTION : On supprime l'appel redondant et on utilise le dump AST
+            // déjà récupéré lors de l'appel unifié. C'est la clé de la fiabilité.
+            if (processingResults && processingResults.ast_dump) {
+                lastDiagramAstDump = processingResults.ast_dump;
+                console.log("lastDiagramAstDump mis à jour via le processus unifié.");
+            } else {
+                // Si le traitement a échoué ou n'a pas retourné de dump, on réinitialise la référence.
+                lastDiagramAstDump = "";
+                console.warn("Impossible de mettre à jour le dump AST de référence via le processus unifié.");
+            }
+            
+            // 4. EXÉCUTION DU DÉFI :
+            // Mettre l'UI en état "par défaut" avant de lancer le défi.
+>>>>>>> pyodide_layout_juin25
             setDiagramAndChallengeCardState("default");
             try {
                 variableValuesFromExecution = {};
                 if (typeof pyodide !== 'undefined' && pyodide) {
+<<<<<<< HEAD
                      variableValuesFromExecution = await runAndTraceCodeForChallenge(currentCode, pyodide);
+=======
+                     // On exécute le code original de l'éditeur pour le défi.
+                     variableValuesFromExecution = await runAndTraceCodeForChallenge(originalCode, pyodide);
+>>>>>>> pyodide_layout_juin25
                 } else {
                     console.warn("Pyodide n'est pas encore prêt pour exécuter le code du défi.");
                     alert("Le moteur Python n'est pas encore prêt. Veuillez patienter.");
@@ -1411,12 +1728,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (showSolutionButton) showSolutionButton.disabled = true;
                     return;
                 }
+<<<<<<< HEAD
+=======
+                
+                // Mettre à jour l'interface du défi avec les résultats.
+>>>>>>> pyodide_layout_juin25
                 if (typeof populateChallengeInputs === 'function') {
                     populateChallengeInputs(variableValuesFromExecution, challengeVariablesContainer);
                 }
                 const hasVariables = Object.keys(variableValuesFromExecution).length > 0;
                 if (checkAnswersButton) checkAnswersButton.disabled = !hasVariables;
                 if (showSolutionButton) showSolutionButton.disabled = !hasVariables;
+<<<<<<< HEAD
+=======
+
+>>>>>>> pyodide_layout_juin25
             } catch (error) {
                 console.error("Erreur lors de l'exécution du code pour le défi:", error);
                 const container = document.getElementById('variables-container');
@@ -1436,8 +1762,22 @@ document.addEventListener('DOMContentLoaded', function() {
     if (checkAnswersButton) {
         checkAnswersButton.addEventListener('click', function() {
             console.log("Bouton 'Vérifier les réponses' cliqué.");
+<<<<<<< HEAD
             if (typeof checkStudentAnswers === 'function' && typeof buildFeedbackModalContent === 'function' && feedbackModal) {
                 const results = checkStudentAnswers(variableValuesFromExecution);
+=======
+            if (typeof checkStudentAnswers === 'function' 
+                && typeof buildFeedbackModalContent === 'function' && feedbackModal) {
+                const results = checkStudentAnswers(variableValuesFromExecution);
+
+                if (typeof logVerifyAnswers === 'function') {
+                if (currentChallengeCodeId) {
+                    logVerifyAnswers(results, currentChallengeCodeId);
+                } else {
+                    console.warn("Impossible de journaliser la vérification : aucun code_id de défi n'est disponible.");
+                }
+            }
+>>>>>>> pyodide_layout_juin25
                 const feedbackData = buildFeedbackModalContent(results);
                 const feedbackContentElement = document.getElementById('feedback-modal-content');
                 if (feedbackContentElement) {
@@ -1453,6 +1793,19 @@ document.addEventListener('DOMContentLoaded', function() {
     if (showSolutionButton) {
         showSolutionButton.addEventListener('click', function() {
             console.log("Bouton 'Révéler la solution' cliqué.");
+<<<<<<< HEAD
+=======
+
+            // CORRECTION : On utilise l'ID du défi en cours.
+            if (typeof logRevealSolution === 'function') {
+                if (currentChallengeCodeId) {
+                    logRevealSolution(currentChallengeCodeId);
+                } else {
+                    console.warn("Impossible de journaliser la révélation : aucun code_id de défi n'est disponible.");
+                }
+            }
+
+>>>>>>> pyodide_layout_juin25
             if (typeof revealCorrectSolution === 'function') {
                 revealCorrectSolution(variableValuesFromExecution);
             } else {

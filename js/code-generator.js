@@ -247,7 +247,11 @@ function generateRandomPythonCode(options) {
             line.includes(`${listVarName}.extend(`) ||
             line.includes(`${listVarName}[`) ||
             line.includes(`for `) && line.includes(` in ${listVarName}:`);
+<<<<<<< HEAD
         
+=======
+            // A AJOUTER line.includes(`len(${listVarName})`
+>>>>>>> pyodide_layout_juin25
         //
         return isNotDeclaration && line.includes(listVarName) && isSignificantUse;
     });
@@ -616,6 +620,10 @@ function generateRandomPythonCode(options) {
                         bodyLines.push(`${indent}${generateVariedOperation(targetType, targetVar, structureDifficulty).replace(/;$/, '')}`);
                         // défensif: supprimer les ";" de JS si ils arrivent à passer
                     }
+<<<<<<< HEAD
+=======
+
+>>>>>>> pyodide_layout_juin25
                 }
                 break;
             }
@@ -897,8 +905,11 @@ function generateRandomPythonCode(options) {
         
         // On traite la génération du 'elif' et du 'else' de manière indépendante.
 
+<<<<<<< HEAD
         let hasElif = false; // Pour savoir si un elif a été ajouté
 
+=======
+>>>>>>> pyodide_layout_juin25
         // 1. Gérer le 'elif'
         if (options.cond_if_elif) {
             let elifCondition;
@@ -918,7 +929,10 @@ function generateRandomPythonCode(options) {
                 indentLevel--;
                 
                 linesAdded += 2;
+<<<<<<< HEAD
                 hasElif = true;
+=======
+>>>>>>> pyodide_layout_juin25
             }
         }
         
@@ -1156,8 +1170,13 @@ function generateRandomPythonCode(options) {
         
         // --- Génération de l'appel de la fonction ---
         
+<<<<<<< HEAD
         // N'appelle la fonction que si la décision a été prise // et qu'il reste de la place.
         if (shouldCallFunction) { // && linesGenerated < targetLines) {
+=======
+        // N'appelle la fonction que si la décision a été prise
+        if (shouldCallFunction ) { //&& linesGenerated < targetLines
+>>>>>>> pyodide_layout_juin25
         
             // Génère des arguments concrets pour l'appel, correspondant aux types des paramètres.
             const args = params.map((param, index) => {
