@@ -130,6 +130,10 @@ function generateRandomPythonCode(options) {
         list: [],
         bool: []
     };
+    
+    // NOUVEAU : Registre pour stocker les métadonnées des variables (valeur, longueur réelle)
+    let variableRegistry = {}; 
+
     let allDeclaredVarNames = new Set(); // Pour éviter les doublons de noms + contrôler taille du pb
     
     // Variables planifiées mais pas encore déclarées
@@ -175,6 +179,26 @@ function generateRandomPythonCode(options) {
         // Enregistre la nouvelle variable comme étant déclarée.
         allDeclaredVarNames.add(name);
         declaredVarsByType[type].push(name);
+        
+        // --- NOUVEAU : Calcul et stockage de la longueur réelle ---
+        let realLength = 0;
+        if (type === 'str') {
+            // Enlever les guillemets pour avoir la vraie longueur de la chaîne
+            realLength = String(finalValue).replace(/^["']|["']$/g, '').length;
+        } else if (type === 'list') {
+            // Compter les éléments séparés par des virgules (approximation suffisante)
+            // On enlève les crochets [ ] puis on split
+            const content = String(finalValue).replace(/^\[|\]$/g, '');
+            realLength = content.trim() === '' ? 0 : content.split(',').length;
+        }
+        
+        variableRegistry[name] = {
+            type: type,
+            value: finalValue,
+            length: realLength
+        };
+        // ----------------------------------------------------------
+
         linesGenerated++;
         
         return name;
@@ -661,12 +685,40 @@ function generateRandomPythonCode(options) {
                     switch (firstType) {
                         case 'str':
                             // Opérations sur chaînes
-                            let chosenLetterParam = firstParam[getRandomInt(0, firstParam.length - 1)];
+                            
+                            // --- CORRECTION MAJEURE ---
+                            // On vérifie si on connait la longueur de la variable (cas global)
+                            // ou si c'est un paramètre (longueur inconnue -> code défensif)
+                            
+                            let accessIndex = 0;
+                            let safeAccessCode = "";
+                            
+                            if (variableRegistry[firstParam]) {
+                                // Cas 1 : Variable globale connue
+                                const len = variableRegistry[firstParam].length;
+                                if (len > 0) {
+                                    accessIndex = getRandomInt(0, len - 1);
+                                    // On est sûr que ça ne plantera pas
+                                    safeAccessCode = `${indent}${localResultVar} = ${firstParam}[${accessIndex}] + "_" + ${firstParam}`;
+                                } else {
+                                    safeAccessCode = `${indent}${localResultVar} = "vide"`;
+                                }
+                            } else {
+                                // Cas 2 : Paramètre de fonction (longueur inconnue)
+                                // On génère un code pédagogique avec if len()
+                                const targetIdx = getRandomInt(1, 4); // On tente d'accéder à l'index 1, 2, 3 ou 4
+                                safeAccessCode = [
+                                    `${indent}if len(${firstParam}) > ${targetIdx}:`,
+                                    `${indent}    ${localResultVar} = ${firstParam}[${targetIdx}]  # Accès sécurisé`,
+                                    `${indent}else:`,
+                                    `${indent}    ${localResultVar} = ${firstParam}[0] if len(${firstParam}) > 0 else ""`
+                                ].join('\n');
+                            }
+
                             const stringOps = [
                                 `${indent}${localResultVar} = ${firstParam}.upper()`,
                                 `${indent}${localResultVar} = ${firstParam} + " processed"`,
-                                `${indent}${localResultVar} = ${firstParam}.replace("${chosenLetterParam}", "${chosenLetterParam.toUpperCase()}")`,  // Remplacer une lettre aléatoire par sa majuscule
-                                `${indent}${localResultVar} = ${firstParam}[${getRandomInt(0, firstParam.length - 1)}] + ${firstParam}`
+                                safeAccessCode // Utilisation de notre code sécurisé
                             ];
                             operations.push(getRandomItem(stringOps));
                             break;
@@ -678,13 +730,31 @@ function generateRandomPythonCode(options) {
                             // Opérations sur listes - conditionnées par les options ou la difficulté
                             const useAdvancedListOps = contextOptions.difficulty >= 4 || options.builtin_isinstance || options.builtin_len;
                             
+                            // --- CORRECTION LISTES ---
+                            let listAccessCode = "";
+                            if (variableRegistry[firstParam]) {
+                                // Variable connue
+                                const len = variableRegistry[firstParam].length;
+                                if (len > 0) {
+                                    const idx = getRandomInt(0, len - 1);
+                                    listAccessCode = `${indent}${localResultVar} = ${firstParam}[${idx}]`;
+                                } else {
+                                    listAccessCode = `${indent}${localResultVar} = 0`;
+                                }
+                            } else {
+                                // Paramètre inconnu : Code défensif pédagogique
+                                listAccessCode = [
+                                    `${indent}if len(${firstParam}) > 0:`,
+                                    `${indent}    ${localResultVar} = ${firstParam}[0]`,
+                                    `${indent}else:`,
+                                    `${indent}    ${localResultVar} = 0`
+                                ].join('\n');
+                            }
+
                             // Version basique des opérations sur listes (sans len/isinstance)
                             const basicListOps = [
                                 `${indent}${localResultVar}.append(${getRandomInt(1, 5)})`,
-                                `${indent}if ${firstParam}:  # Vérifier que la liste n'est pas vide`,
-                                `${indent}    ${localResultVar} = ${firstParam}[0]`,
-                                `${indent}else:`,
-                                `${indent}    ${localResultVar} = 0`
+                                listAccessCode // Notre accès sécurisé
                             ];
                             
                             // Version avancée des opérations sur listes (avec len/isinstance)
@@ -1553,14 +1623,14 @@ function generateRandomPythonCode(options) {
     if (isRepeat) {
         // Stratégie 1: Ajouter un commentaire unique pour rendre l'opération différente
         const uniqueId = Math.random().toString(36).substring(2, 5);
-        operation = operation.replace(/\s*#.*$/, '') + `  # variation ${uniqueId}`;
+        operation = operation.replace(/\s*#.*$/, '') + `  # unique_${uniqueId}`;
         
         // Stratégie 2 (alternative): Essayer d'inverser l'ordre des opérandes si possible
         if (operation.includes('=') && operation.includes('+')) {
             const parts = operation.split('=');
             if (parts.length === 2) {
                 const leftSide = parts[0].trim();
-                const rightSide = parts[1].trim();
+                               const rightSide = parts[1].trim();
                 
                 // Si le format est "var = var + x", essayer "var = x + var"
                 if (rightSide.startsWith(leftSide + ' +')) {
@@ -1642,11 +1712,14 @@ function generateRandomPythonCode(options) {
                 () => `${varName}.append(${getRandomInt(1, 10)})`,
                 () => `${varName}.extend([${getRandomInt(1, difficulty)}, ${getRandomInt(difficulty+1, difficulty+5 )}])`,
                 // si la liste est non vide: on accède à des positions spécifiques
+                // CORRECTION : Utiliser un index petit (0) car les listes générées ont au moins 2 éléments.
+                // L'ancienne logique utilisait declaredVarsByType.list.length (nombre de variables) ce qui était illogique et risqué.
                 ...(declaredVarsByType.list.length > 0 ? [
-                    () => `${varName}[${getRandomInt(0, declaredVarsByType.list.length - 1)}] = ${getRandomInt(1, difficulty+6)}`] : []),
+                    () => `${varName}[0] = ${getRandomInt(1, difficulty+6)}`] : []),
                 // Insertion d'éléments
                 ...(difficulty >= 4 ? [
-                    () => `${varName}.insert(${getRandomInt(0, declaredVarsByType.list.length - 1)}, ${getRandomInt(-difficulty, +difficulty)})`] : []),
+                    // insert est safe en Python même si l'index est hors bornes (ça append), mais restons cohérents
+                    () => `${varName}.insert(${getRandomInt(0, 1)}, ${getRandomInt(-difficulty, +difficulty)})`] : []),
                 // Suppression d'éléments
                 ...(declaredVarsByType.list.length > 0 ? [
                     () => `if len(${varName}) > 0: ${varName}.pop(0) # Suppression du premier élément`
@@ -1719,7 +1792,7 @@ function generateRandomPythonCode(options) {
         // Si après plusieurs tentatives on a toujours une répétition, ajouter un commentaire unique
         // remplacer tout commentaire Python existant par un nouveau commentaire improbable
         if (isRepeat) {
-            operation = operation.replace(/\s*#.*$/, '') + `  # variation ${Math.random().toString(36).substr(2, 3)}`;
+            operation = operation.replace(/\s*#.*$/, '') + `  # unique_${Math.random().toString(36).substr(2, 5)}`;
         }
         // vérifier si l'opération existe déjà dans codeLines
         let exactLineExists = codeLines.some(line => 
