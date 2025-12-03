@@ -1049,17 +1049,30 @@ async function exportFlowchartAsPng() {
         `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
     );
 
-    // 4. Sérialiser le SVG
+    // Nettoyer d'éventuels <image href="http://..."> qui repollueraient le canvas
+    const images = clonedSvg.querySelectorAll('image');
+    images.forEach(node => {
+        const href = node.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+                  || node.getAttribute('href');
+        if (href && !href.startsWith('data:')) {
+            console.warn('Image externe supprimée du SVG pour éviter CORS :', href);
+            node.parentNode.removeChild(node);
+        }
+    });
+    
+    // 4. Sérialiser le SVG en data URL
     const serializer = new XMLSerializer();
     let svgString = serializer.serializeToString(clonedSvg);
     if (!svgString.startsWith('<?xml')) {
         svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
     }
 
-    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(svgBlob);
+    const svgBase64 = window.btoa(unescape(encodeURIComponent(svgString)));
+    const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
 
     const img = new Image();
+    img.crossOrigin = 'anonymous';
+
     img.onload = function () {
         const canvas = document.createElement('canvas');
         canvas.width  = exportWidth;
@@ -1067,7 +1080,6 @@ async function exportFlowchartAsPng() {
 
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-            URL.revokeObjectURL(url);
             return;
         }
 
@@ -1076,40 +1088,47 @@ async function exportFlowchartAsPng() {
         ctx.fillRect(0, 0, exportWidth, exportHeight);
         ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
 
-        URL.revokeObjectURL(url);
+        try {
+            canvas.toBlob(function (blob) {
+                if (!blob) {
+                    alert("Impossible de générer le PNG (blob nul).");
+                    return;
+                }
+                const pngUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = pngUrl;
 
-        canvas.toBlob(function (blob) {
-            if (!blob) return;
-            const pngUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = pngUrl;
+                const now = new Date();
+                const yyyy = now.getFullYear();
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const hh = String(now.getHours()).padStart(2, '0');
+                const mi = String(now.getMinutes()).padStart(2, '0');
 
-            const now = new Date();
-            const yyyy = now.getFullYear();
-            const mm = String(now.getMonth() + 1).padStart(2, '0');
-            const dd = String(now.getDate()).padStart(2, '0');
-            const hh = String(now.getHours()).padStart(2, '0');
-            const mi = String(now.getMinutes()).padStart(2, '0');
-
-            a.download = `logigramme_${yyyy}${mm}${dd}_${hh}${mi}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(pngUrl);
-        }, 'image/png');
+                a.download = `logigramme_${yyyy}${mm}${dd}_${hh}${mi}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(pngUrl);
+            }, 'image/png');
+        } catch (err) {
+            console.error('Erreur lors de toBlob (CORS probable) :', err);
+            alert("Le navigateur bloque l’export PNG pour des raisons de sécurité (CORS).");
+        }
     };
-    img.onerror = function () {
-        URL.revokeObjectURL(url);
+
+    img.onerror = function (e) {
+        console.error('Erreur chargement image SVG :', e);
         alert("Impossible de convertir le diagramme en PNG.");
     };
 
-    img.src = url;
+    img.src = svgDataUrl;
 }
 
 // --- Gestion des événements pour les boutons et éléments de l'interface ---
 document.addEventListener('DOMContentLoaded', function() {
     // --- Gestion du Thème (Dark/Light) ---
-    const themeToggleBtn = document.getElementById('theme-toggle'); // Assurez-vous que ce bouton existe dans layout.html
+    const themeToggleBtn = document.getElementById('theme-toggle');
     
     // Appliquer le thème sauvegardé au chargement
     const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -1714,7 +1733,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Export PNG du logigramme ---
     const exportPngBtn = document.getElementById('diagram-export-png-btn');
     if (exportPngBtn) {
-        exportPngBtn.addEventListener('click', exportFlowchartAsPng);
+        exportPngBtn.addEventListener('click', () => {
+            console.log("Export PNG cliqué");
+            exportFlowchartAsPng();
+        });
+    } else {
+        console.warn("Bouton #diagram-export-png-btn introuvable.");
     }
 }); // <--- FIN DU DOMContentLoaded
 
