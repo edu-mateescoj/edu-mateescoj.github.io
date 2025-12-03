@@ -533,17 +533,37 @@
     <!-- RESIZER -->
     <div id="resizer" class="d-none d-lg-block"></div>
 
-    <!-- COLONNE DIAGRAMME -->
-    <div class="col-lg-6" id="col-diagram">
-        <div class="card h-100">
-            <!-- En-tête de la carte : Représentation en Diagramme -->
-            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                <!-- Titre de la carte -->
-                <h2 class="h5 mb-0">Logigramme</h2>
-                <button class="btn btn-sm btn-outline-light" onclick="toggleFullScreen()">
-                    <i class="fas fa-expand"></i> <!-- <span class="badge bg-dark d-none d-sm-inline">Algorithme Visuel</span> -->
+<!-- COLONNE DIAGRAMME -->
+<div class="col-lg-6" id="col-diagram">
+    <div class="card h-100">
+        <!-- En-tête de la carte -->
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <!-- Titre de la carte -->
+            <h2 class="h5 mb-0">Logigramme</h2>
+
+            <!-- Groupe de boutons aligné à droite dans le header,
+                 même principe que les boutons +/- de "Éditeur Python" -->
+            <div class="btn-group btn-group-sm" role="group" aria-label="Outils du diagramme">
+                <!-- Export PNG -->
+                <button id="diagram-export-png-btn"
+                        type="button"
+                        class="btn btn-outline-light"
+                        title="Exporter le logigramme en PNG">
+                    <i class="fas fa-file-image"></i>
+                </button>
+
+                <!-- Plein écran -->
+                <button id="diagram-fullscreen-btn"
+                        type="button" 
+                        class="btn btn-outline-light"
+                        onclick="toggleFullScreen()"
+                        title="Afficher le logigramme en plein écran">
+                    <i class="fas fa-expand"></i>
                 </button>
             </div>
+        </div>
+            
+            <!-- Corps de la carte -->
             <div class="card-body overflow-hidden position-relative p-0 border-top border-light" style="height: 500px;">
                 <!-- Barre d'outils flottante pour le zoom -->
                 <div id="zoom-controls" class="position-absolute top-0 end-0 m-2 btn-group-vertical" style="z-index: 10; display: none;">

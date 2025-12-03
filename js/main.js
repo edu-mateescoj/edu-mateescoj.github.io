@@ -1001,98 +1001,110 @@ function clearConsole() {
 }
 
 /**
- * Gère la fonction input() de Python en affichant un modal.
- * Retourne une Promise qui se résout avec la saisie de l'utilisateur.
- * @param {string} prompt Le message à afficher à l'utilisateur.
- * @returns {Promise<string>}
+ * Exporte le diagramme Mermaid actuel (#flowchart) en PNG
+ * avec une taille "document-friendly":
+ * - largeur visée ~900px
+ * - sans réduire trop les grands graphes
+ * - sans agrandir de façon excessive les tout petits.
  */
-function handlePythonInput(prompt) {
-    console.log("DEBUG : Appel à handlePythonInput avec prompt:", prompt);
-    const inputModal = new bootstrap.Modal(document.getElementById('input-modal'));
-    const promptElement = document.getElementById('input-modal-prompt');
-    const inputField = document.getElementById('input-modal-field');
-    const submitButton = document.getElementById('input-modal-submit-btn');
+async function exportFlowchartAsPng() {
+    const container = document.getElementById('flowchart');
+    if (!container) return;
 
-    if(promptElement) promptElement.textContent = prompt || "";
-    if(inputField) inputField.value = '';
-
-    return new Promise((resolve) => {
-        const submitListener = () => {
-            const value = inputField.value;
-            submitButton.removeEventListener('click', submitListener);
-            inputField.removeEventListener('keydown', enterListener);
-            inputModal.hide();
-            resolve(value);
-        };
-
-        const enterListener = (event) => {
-            if (event.key === 'Enter') {
-                submitListener();
-            }
-        };
-
-        submitButton.addEventListener('click', submitListener);
-        inputField.addEventListener('keydown', enterListener);
-
-        document.getElementById('input-modal').addEventListener('shown.bs.modal', () => {
-            inputField.focus();
-        }, { once: true });
-
-        inputModal.show();
-    });
-}
-
-/**
- * Formate une erreur Python en un message lisible pour un élève.
- * @param {string} traceback Le traceback complet de Python.
- * @returns {string} Un message d'erreur formaté et simplifié.
- */
-function formatPythonError(traceback) {
-    if (!traceback) return "Une erreur inconnue est survenue.";
-
-    const lines = traceback.trim().split('\n');
-    const errorLine = lines[lines.length - 1];
-
-    const match = errorLine.match(/^(\w+):\s*(.*)$/);
-    if (!match) return traceback;
-
-    const errorType = match[1];
-    const errorMessage = match[2];
-    let hint = "";
-
-    switch (errorType) {
-        case 'NameError':
-            hint = `'NameError': La variable ${errorMessage.split("'")[1]} a été utilisée avant d'avoir reçu une valeur. Avez-vous fait une faute de frappe ou oublié de l'initialiser ?`;
-            break;
-        case 'TypeError':
-            hint = "'TypeError': Vous avez essayé de faire une opération entre des types de données incompatibles. Par exemple, additionner un nombre et du texte (`5 + 'hello'`). Vérifiez que vos variables ont le bon type.";
-            break;
-        case 'IndexError':
-            hint = "'IndexError': Vous avez essayé d'accéder à un élément d'une liste ou d'une chaîne avec un indice qui n'existe pas. Par exemple, demander le 5ème élément d'une liste qui n'en a que 3.";
-            break;
-        case 'SyntaxError':
-            hint = `'SyntaxError': Votre code contient une erreur d'écriture. Vérifiez attentivement la ligne indiquée : les deux-points (\`:\`) à la fin des \`if\`/\`for\`/\`def\`, l'indentation (les espaces au début des lignes), et les parenthèses. Message original : ${errorMessage}`;
-            break;
-        case 'ValueError':
-            hint = `'ValueError': Une fonction a reçu un argument du bon type, mais avec une valeur inappropriée. Par exemple, \`int('abc')\`. Message original : ${errorMessage}`;
-            break;
-        case 'ZeroDivisionError':
-            hint = "'ZeroDivisionError': Vous avez tenté de diviser un nombre par zéro, ce qui est impossible en mathématiques.";
-            break;
-        default:
-            hint = "Une erreur est survenue. Lisez attentivement le message pour trouver un indice.";
+    const svg = container.querySelector('svg');
+    if (!svg) {
+        alert("Aucun diagramme à exporter. Lance d'abord la génération.");
+        return;
     }
 
-    return `Erreur détectée : ${errorLine}\n\n💡 Piste : ${hint}`;
-}
+    // 1. Récupérer la boîte englobante réelle
+    const bbox = svg.getBBox();
+    let diagramWidth  = bbox.width;
+    let diagramHeight = bbox.height;
 
-/**********************************************************/
-/**********************************************************/
-// --- Point d'entrée principal de l'application ---
-// --- Variables d'état pour le mode avancé ---
-// Ces variables contrôlent l'état des sections de syntaxe dynamique (Ctrl, Loop, Func)
-let advancedModeActive = false;
-let currentSyntaxFrame = null; // 'conditions', 'loops', ou 'functions'
+    if (!diagramWidth || !diagramHeight) {
+        // Fallback si getBBox échoue
+        diagramWidth  = parseInt(svg.getAttribute('width'))  || 800;
+        diagramHeight = parseInt(svg.getAttribute('height')) || 600;
+    }
+
+    // 2. Calculer un facteur d'échelle "raisonnable"
+    const TARGET_WIDTH = 900;   // Taille idéale pour insertion dans un document
+    const MIN_SCALE    = 0.8;   // Ne pas trop réduire les gros diagrammes
+    const MAX_SCALE    = 1.8;   // Ne pas sur-agrandir les minuscules
+
+    let scale = TARGET_WIDTH / diagramWidth;
+    if (scale < MIN_SCALE) scale = MIN_SCALE;
+    if (scale > MAX_SCALE) scale = MAX_SCALE;
+
+    const exportWidth  = Math.round(diagramWidth  * scale);
+    const exportHeight = Math.round(diagramHeight * scale);
+
+    // 3. Cloner le SVG pour l'export
+    const clonedSvg = svg.cloneNode(true);
+    clonedSvg.setAttribute('width',  exportWidth);
+    clonedSvg.setAttribute('height', exportHeight);
+    clonedSvg.setAttribute(
+        'viewBox',
+        `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
+    );
+
+    // 4. Sérialiser le SVG
+    const serializer = new XMLSerializer();
+    let svgString = serializer.serializeToString(clonedSvg);
+    if (!svgString.startsWith('<?xml')) {
+        svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
+    }
+
+    const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.onload = function () {
+        const canvas = document.createElement('canvas');
+        canvas.width  = exportWidth;
+        canvas.height = exportHeight;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            URL.revokeObjectURL(url);
+            return;
+        }
+
+        // Fond blanc pour un rendu propre dans les documents (évite fond sombre/transp.)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, exportWidth, exportHeight);
+        ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
+
+        URL.revokeObjectURL(url);
+
+        canvas.toBlob(function (blob) {
+            if (!blob) return;
+            const pngUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = pngUrl;
+
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            const hh = String(now.getHours()).padStart(2, '0');
+            const mi = String(now.getMinutes()).padStart(2, '0');
+
+            a.download = `logigramme_${yyyy}${mm}${dd}_${hh}${mi}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(pngUrl);
+        }, 'image/png');
+    };
+    img.onerror = function () {
+        URL.revokeObjectURL(url);
+        alert("Impossible de convertir le diagramme en PNG.");
+    };
+
+    img.src = url;
+}
 
 // --- Gestion des événements pour les boutons et éléments de l'interface ---
 document.addEventListener('DOMContentLoaded', function() {
@@ -1699,6 +1711,11 @@ document.addEventListener('DOMContentLoaded', function() {
     handleVisualInterdependencies();
     initializeUI();
 
+    // --- Export PNG du logigramme ---
+    const exportPngBtn = document.getElementById('diagram-export-png-btn');
+    if (exportPngBtn) {
+        exportPngBtn.addEventListener('click', exportFlowchartAsPng);
+    }
 }); // <--- FIN DU DOMContentLoaded
 
 /**
