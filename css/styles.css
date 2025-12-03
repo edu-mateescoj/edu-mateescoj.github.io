@@ -50,6 +50,9 @@
     border: none;
     font-family: 'Fira Code', 'Consolas', monospace;
     font-size: 16px; /* Taille de base */
+    /* CRITIQUE : empêcher le débordement vertical */
+    max-height: 100% !important;
+    overflow: hidden !important; /* Le scrolling sera géré par CodeMirror lui-même */
 }
 
 /* Surcharge des couleurs CodeMirror pour utiliser nos variables */
@@ -266,6 +269,17 @@ body, .card, .btn, .form-control {
     /* On gère les couleurs via les classes Bootstrap HTML pour la simplicité */
     border-radius: 0 0 0.25rem 0.25rem; /* Arrondi uniquement en bas */
     border-top: 1px solid rgba(255, 255, 255, 0.2); /* Séparateur subtil avec l'éditeur */
+    /* CRITIQUE : empêcher la compression de la toolbar */
+    flex-shrink: 0 !important;
+    min-height: 38px; /* Hauteur minimale pour garantir la visibilité des boutons */
+    z-index: 10; /* S'assurer qu'elle reste au-dessus de CodeMirror */
+}
+
+/* Conteneur de l'éditeur : contraindre la hauteur pour éviter le débordement */
+#col-editor .card-body > .flex-grow-1 {
+    /* S'assurer que le conteneur ne déborde pas */
+    overflow: hidden;
+    min-height: 0; /* Permet au flex-item de rétrécir en dessous de sa taille de contenu */
 }
 
 /* --- 2. SPLITTER (Redimensionnement) --- */
