@@ -75,6 +75,52 @@ let checkAnswersButton;
 let showSolutionButton;
 let feedbackModal;
 
+// --- 1. TAILLE DE POLICE CODEMIRROR ---
+let currentFontSize = 16;
+
+/**
+ * Applique la taille de police courante (currentFontSize) à
+ * - l'éditeur CodeMirror
+ * - la section "Défi" (#variables-container)
+ */
+function applyCurrentFontSize() {
+    // Éditeur
+    if (codeEditorInstance) {
+        const wrapper = codeEditorInstance.getWrapperElement();
+        if (wrapper) {
+            wrapper.style.fontSize = currentFontSize + "px";
+            codeEditorInstance.refresh();
+        }
+    }
+
+    // Section Défi
+    const challengeContainer = document.getElementById('variables-container');
+    if (challengeContainer) {
+        challengeContainer.style.fontSize = currentFontSize + "px";
+        
+        // AJOUT DEBUG POUR SI LE CSS NE SUIT PAS :
+        const inputs = challengeContainer.querySelectorAll('.form-control, .input-group-text, .btn');
+        inputs.forEach(el => el.style.fontSize = currentFontSize + "px");
+        // Sélecteur large pour attraper tout ce qui contient du texte
+        const elements = challengeContainer.querySelectorAll('input, span, div, label, button, .input-group-text, .form-control');
+        
+        elements.forEach(el => {
+            // On force la taille en ligne avec !important (via cssText car style.fontSize ne prend pas !important directement)
+            el.style.cssText += `; font-size: ${currentFontSize}px !important;`;
+        });
+    }
+}
+
+function changeFontSize(delta) {
+    if (!codeEditorInstance) return;
+    
+    currentFontSize += delta;
+    if (currentFontSize < 10) currentFontSize = 10;
+    if (currentFontSize > 32) currentFontSize = 32;
+    
+    applyCurrentFontSize();
+}
+
 // --- Fonctions de gestion de l'éditeur ---
 function setEditorEditable(editable) {
     isEditorEditable = editable;
@@ -331,6 +377,9 @@ z = x + y`;
                 </div>`;
         }
     }
+
+    // appliquer la taille actuelle au contenu nouvellement injecté
+    applyCurrentFontSize();
 
     // 4. Désactiver les boutons du défi, car aucun code n'a encore été exécuté.
     if (checkAnswersButton) checkAnswersButton.disabled = true;
@@ -1627,7 +1676,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Mettre à jour l'interface du défi avec les résultats.
                 if (typeof populateChallengeInputs === 'function') {
                     populateChallengeInputs(variableValuesFromExecution, challengeVariablesContainer);
+                    // Juste après avoir rempli le défi, on réapplique la taille de police
+                    applyCurrentFontSize(); 
                 }
+                // Ré-appliquer la taille de police courante au Défi
+                applyCurrentFontSize();
                 const hasVariables = Object.keys(variableValuesFromExecution).length > 0;
                 if (checkAnswersButton) checkAnswersButton.disabled = !hasVariables;
                 if (showSolutionButton) showSolutionButton.disabled = !hasVariables;
@@ -1730,6 +1783,9 @@ document.addEventListener('DOMContentLoaded', function() {
     handleVisualInterdependencies();
     initializeUI();
 
+    // Appliquer la taille de police initiale à l'éditeur ET à la section Défi
+    applyCurrentFontSize();
+
     // --- Export PNG du logigramme ---
     const exportPngBtn = document.getElementById('diagram-export-png-btn');
     if (exportPngBtn) {
@@ -1789,22 +1845,7 @@ function handlePythonInput(prompt) {
 // GESTION DE L'INTERFACE UTILISATEUR (UI)
 // ==========================================
 
-// --- 1. TAILLE DE POLICE CODEMIRROR ---
-let currentFontSize = 16;
-
-function changeFontSize(delta) {
-    if (!codeEditorInstance) return;
-    
-    currentFontSize += delta;
-    // Limites raisonnables (10px à 32px)
-    if (currentFontSize < 10) currentFontSize = 10;
-    if (currentFontSize > 32) currentFontSize = 32;
-    
-    const wrapper = codeEditorInstance.getWrapperElement();
-    wrapper.style.fontSize = currentFontSize + "px";
-    codeEditorInstance.refresh();
-}
-
+// --- (en 1. la taille de police déplacée plus haut) ---
 // --- 2. SPLITTER (Redimensionnement Manuel) ---
 document.addEventListener('DOMContentLoaded', function() {
     initResizer();

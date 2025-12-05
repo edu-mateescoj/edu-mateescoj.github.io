@@ -396,55 +396,15 @@ body, .card, .btn, .form-control {
     background-color: #ced4da;
 }
 
-/* COLONNE ÉDITEUR */
-<div class="col-lg-6 mb-3 mb-lg-0" id="col-editor">
-    <div class="card h-100">
-        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center flex-wrap">
-            <h2 class="h5 mb-0">Code Python</h2>
-            <div class="d-flex align-items-center mt-2 mt-sm-0">
-                <button id="run-code-btn" class="btn btn-sm btn-success">
-                    <i class="fas fa-play me-1"></i> legacy Lancer
-                </button>
-            </div>
-        </div>
-
-        <!-- body en flex colonne avec hauteur contrôlée -->
-        <div class="card-body p-0 d-flex flex-column" style="height: 500px; min-height: 350px;">
-            
-            <!-- Message mobile -->
-            <div class="d-md-none px-3 pt-2 pb-1">
-                <small class="text-muted">
-                    <i class="fas fa-info-circle me-1"></i>
-                    Faites pivoter votre appareil pour une meilleure expérience d'édition
-                </small>
-            </div>
-
-            <!-- Conteneur “cadre” de CodeMirror -->
-            <div class="flex-grow-1 px-2 pb-2">
-                <div class="h-100 border border-light rounded-bottom bg-light">
-                    <textarea id="code-editor"></textarea>
-                </div>
-            </div>
-
-            <!-- Toolbar -->
-            <div id="code-toolbar" class="d-flex align-items-center justify-content-start py-1 px-2 bg-secondary text-white">
-                <button id="toggle-editable-btn" class="btn btn-sm btn-outline-light me-2" title="Rendre non éditable">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button id="download-code-btn" class="btn btn-sm btn-outline-light me-2" title="Sauver le code dans un fichier .py">
-                    <i class="fas fa-download"></i>
-                </button>
-                <button id="open-file-btn" class="btn btn-sm btn-outline-light me-2" title="Ouvrir un fichier .py">
-                    <i class="fas fa-folder-open"></i>
-                    <input type="file" id="file-input" accept=".py" style="display:none;">
-                </button>
-                <button id="share-code-btn" class="btn btn-sm btn-outline-light me-2" title="Copier dans le presse-papier">
-                    <i class="fas fa-share-alt"></i>
-                </button>
-                <button id="reload-code-btn" class="btn btn-sm btn-outline-light" title="Restaurer le code à la dernière génération/chargement">
-                    <i class="fas fa-undo"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
+/* Section Défi : hérite explicitement de la taille définie via JS */
+#variables-container,
+#variables-container .row,
+#variables-container .col-12,
+#variables-container .col-lg-4,
+#variables-container .col-md-6,
+#variables-container .col-sm-12,
+#variables-container .input-group,
+#variables-container .input-group-text,
+#variables-container .form-control {
+    font-size: inherit !important;
+}
