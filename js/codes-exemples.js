@@ -1,6 +1,9 @@
 // js/exemples-code.js
 
-const PREDEFINED_EXAMPLES = [
+console.log("✅ Chargement du fichier codes-exemples.js");
+
+// CHANGEMENT : On utilise window. pour garantir l'accès global
+window.PREDEFINED_EXAMPLES = [
     {
         name: "If/Elif/Else Simple",
         code: `a = 5

@@ -75,6 +75,64 @@ let checkAnswersButton;
 let showSolutionButton;
 let feedbackModal;
 
+// --- 1. TAILLE DE POLICE CODEMIRROR ---
+let currentFontSize = 16;
+
+/**
+ * Applique la taille de police courante (currentFontSize) à
+ * - l'éditeur CodeMirror
+ * - la section "Défi" (#variables-container) et ses enfants
+ * - la Console d'Exécution (#execution-console-output)
+ */
+function applyCurrentFontSize() {
+    // Éditeur
+    if (codeEditorInstance) {
+        const wrapper = codeEditorInstance.getWrapperElement();
+        if (wrapper) {
+            wrapper.style.fontSize = currentFontSize + "px";
+            codeEditorInstance.refresh();
+        }
+    }
+
+    // Section Défi
+    const challengeContainer = document.getElementById('variables-container');
+    if (challengeContainer) {
+        challengeContainer.style.fontSize = currentFontSize + "px";
+        
+        // AJOUT DEBUG POUR SI LE CSS NE SUIT PAS :
+        const inputs = challengeContainer.querySelectorAll('.form-control, .input-group-text, .btn');
+        inputs.forEach(el => el.style.fontSize = currentFontSize + "px");
+        // Sélecteur large pour attraper tout ce qui contient du texte
+        const elements = challengeContainer.querySelectorAll('input, span, div, label, button, .input-group-text, .form-control');
+        
+        elements.forEach(el => {
+            // On force la taille en ligne avec !important (via cssText car style.fontSize ne prend pas !important directement)
+            el.style.cssText += `; font-size: ${currentFontSize}px !important;`;
+        });
+    }
+    // Console d'Exécution
+    const consoleOutput = document.getElementById('execution-console-output');
+
+    if (consoleOutput) {
+        consoleOutput.style.fontSize = currentFontSize + "px";
+        // la console est un <pre>, donc l etexte hérité devrait suivre, mais on force au cas où
+        const consoleElements = consoleOutput.querySelectorAll('*'); // tous les enfants
+        consoleElements.forEach(el => {
+            el.style.cssText += `; font-size: ${currentFontSize}px !important;`;// on force avec !important
+        });
+    }   
+}
+
+function changeFontSize(delta) {
+    if (!codeEditorInstance) return;
+    
+    currentFontSize += delta;
+    if (currentFontSize < 10) currentFontSize = 10;
+    if (currentFontSize > 32) currentFontSize = 32;
+    
+    applyCurrentFontSize();
+}
+
 // --- Fonctions de gestion de l'éditeur ---
 function setEditorEditable(editable) {
     isEditorEditable = editable;
@@ -332,6 +390,9 @@ z = x + y`;
         }
     }
 
+    // appliquer la taille actuelle au contenu nouvellement injecté
+    applyCurrentFontSize();
+
     // 4. Désactiver les boutons du défi, car aucun code n'a encore été exécuté.
     if (checkAnswersButton) checkAnswersButton.disabled = true;
     if (showSolutionButton) showSolutionButton.disabled = true;
@@ -526,8 +587,6 @@ function updateGlobalConfigSelectors() {
     populateSelectWithOptions(numTotalVariablesGlobalSelect, minVariables, MAX_TOTAL_VARIABLES_GLOBAL, minVariables);
             // Math.max(currentNumTotalVariablesVal, minVariables));
 }
-
-// --- Gestion des interdépendances visuelles (ÉBAUCHE) ---
 // Cette fonction gère les suggestions visuelles basées sur les options sélectionnées.
 // Elle est appelée après chaque changement de syntaxe ou du mode avancé.
 function handleVisualInterdependencies() {
@@ -763,7 +822,7 @@ builtins.input = custom_input
 user_ns = {} 
 _error_detail_trace = None
 # Variable globale pour stocker les noms des fonctions que nous rendons asynchrones
-_async_function_names = set()
+_async_function_names = set();
 
 # Transformateur 1: Trouve 'def' et le transforme en 'async def',
 # tout en mémorisant les noms des fonctions transformées.
@@ -833,30 +892,30 @@ async def main():
         tree = ast.parse(student_code_to_run)
 
         # ÉTAPE 1: Rendre les fonctions asynchrones ('def' -> 'async def')
-        asyncified_tree = AsyncFunctionTransformer().visit(tree)
+        asyncified_tree = AsyncFunctionTransformer().visit(tree);
 
         # ÉTAPE 2: Gérer les 'await' pour input()
         # C'est seulement après que les fonctions sont 'async' qu'on peut y insérer des 'await'.
-        input_awaited_tree = AwaitInputTransformer().visit(asyncified_tree)
+        input_awaited_tree = AwaitInputTransformer().visit(asyncified_tree);
         
         # ÉTAPE 3: Gérer les 'await' pour les appels aux fonctions maintenant asynchrones
-        final_tree = AwaitCallTransformer().visit(input_awaited_tree)
+        final_tree = AwaitCallTransformer().visit(input_awaited_tree);
 
-        ast.fix_missing_locations(final_tree)
-        transformed_code_string = unparse(final_tree)
+        ast.fix_missing_locations(final_tree);
+        transformed_code_string = unparse(final_tree);
 
         # Le code qui sera exécuté contient maintenant 'async def' pour les fonctions
         # et 'await input()', ce qui est une syntaxe Python valide.
-        await pyodide.code.eval_code_async(transformed_code_string, globals=user_ns)
+        await pyodide.code.eval_code_async(transformed_code_string, globals=user_ns);
 
     except Exception as e:
         import traceback
-        _error_detail_trace = traceback.format_exc()
+        _error_detail_trace = traceback.format_exc();
     finally:
         builtins.print = _original_print
         builtins.input = _original_input
 
-await main()
+await main();
 
 # --- Extraction des résultats pour le Défi (INCHANGÉ) ---
 # j'en rajoute qui ne devraient pas avoir à être filtrées car traumatisé par bug pyodide de persistance de variables dans le namespace
@@ -1003,98 +1062,134 @@ function clearConsole() {
 }
 
 /**
- * Gère la fonction input() de Python en affichant un modal.
- * Retourne une Promise qui se résout avec la saisie de l'utilisateur.
- * @param {string} prompt Le message à afficher à l'utilisateur.
- * @returns {Promise<string>}
+ * Exporte le diagramme Mermaid actuel (#flowchart) en PNG
+ * avec une taille "document-friendly":
+ * - largeur visée ~900px
+ * - sans réduire trop les grands graphes
+ * - sans agrandir de façon excessive les tout petits.
  */
-function handlePythonInput(prompt) {
-    console.log("DEBUG : Appel à handlePythonInput avec prompt:", prompt);
-    const inputModal = new bootstrap.Modal(document.getElementById('input-modal'));
-    const promptElement = document.getElementById('input-modal-prompt');
-    const inputField = document.getElementById('input-modal-field');
-    const submitButton = document.getElementById('input-modal-submit-btn');
+async function exportFlowchartAsPng() {
+    const container = document.getElementById('flowchart');
+    if (!container) return;
 
-    promptElement.textContent = prompt || "";
-    inputField.value = '';
-
-    return new Promise((resolve) => {
-        const submitListener = () => {
-            const value = inputField.value;
-            submitButton.removeEventListener('click', submitListener);
-            inputField.removeEventListener('keydown', enterListener);
-            inputModal.hide();
-            resolve(value);
-        };
-
-        const enterListener = (event) => {
-            if (event.key === 'Enter') {
-                submitListener();
-            }
-        };
-
-        submitButton.addEventListener('click', submitListener);
-        inputField.addEventListener('keydown', enterListener);
-
-        document.getElementById('input-modal').addEventListener('shown.bs.modal', () => {
-            inputField.focus();
-        }, { once: true });
-
-        inputModal.show();
-    });
-}
-
-/**
- * Formate une erreur Python en un message lisible pour un élève.
- * @param {string} traceback Le traceback complet de Python.
- * @returns {string} Un message d'erreur formaté et simplifié.
- */
-function formatPythonError(traceback) {
-    if (!traceback) return "Une erreur inconnue est survenue.";
-
-    const lines = traceback.trim().split('\n');
-    const errorLine = lines[lines.length - 1];
-
-    const match = errorLine.match(/^(\w+):\s*(.*)$/);
-    if (!match) return traceback;
-
-    const errorType = match[1];
-    const errorMessage = match[2];
-    let hint = "";
-
-    switch (errorType) {
-        case 'NameError':
-            hint = `'NameError': La variable ${errorMessage.split("'")[1]} a été utilisée avant d'avoir reçu une valeur. Avez-vous fait une faute de frappe ou oublié de l'initialiser ?`;
-            break;
-        case 'TypeError':
-            hint = "'TypeError': Vous avez essayé de faire une opération entre des types de données incompatibles. Par exemple, additionner un nombre et du texte (`5 + 'hello'`). Vérifiez que vos variables ont le bon type.";
-            break;
-        case 'IndexError':
-            hint = "'IndexError': Vous avez essayé d'accéder à un élément d'une liste ou d'une chaîne avec un indice qui n'existe pas. Par exemple, demander le 5ème élément d'une liste qui n'en a que 3.";
-            break;
-        case 'SyntaxError':
-            hint = `'SyntaxError': Votre code contient une erreur d'écriture. Vérifiez attentivement la ligne indiquée : les deux-points (\`:\`) à la fin des \`if\`/\`for\`/\`def\`, l'indentation (les espaces au début des lignes), et les parenthèses. Message original : ${errorMessage}`;
-            break;
-        case 'ValueError':
-            hint = `'ValueError': Une fonction a reçu un argument du bon type, mais avec une valeur inappropriée. Par exemple, \`int('abc')\`. Message original : ${errorMessage}`;
-            break;
-        case 'ZeroDivisionError':
-            hint = "'ZeroDivisionError': Vous avez tenté de diviser un nombre par zéro, ce qui est impossible en mathématiques.";
-            break;
-        default:
-            hint = "Une erreur est survenue. Lisez attentivement le message pour trouver un indice.";
+    const svg = container.querySelector('svg');
+    if (!svg) {
+        alert("Aucun diagramme à exporter. Lance d'abord la génération.");
+        return;
     }
 
-    return `Erreur détectée : ${errorLine}\n\n💡 Piste : ${hint}`;
+    // 1. Récupérer la boîte englobante réelle
+    const bbox = svg.getBBox();
+    let diagramWidth  = bbox.width;
+    let diagramHeight = bbox.height;
+
+    if (!diagramWidth || !diagramHeight) {
+        // Fallback si getBBox échoue
+        diagramWidth  = parseInt(svg.getAttribute('width'))  || 800;
+        diagramHeight = parseInt(svg.getAttribute('height')) || 600;
+    }
+
+    // 2. Calculer un facteur d'échelle "raisonnable"
+    const TARGET_WIDTH = 900;   // Taille idéale pour insertion dans un document
+    const MIN_SCALE    = 0.8;   // Ne pas trop réduire les gros diagrammes
+    const MAX_SCALE    = 1.8;   // Ne pas sur-agrandir les minuscules
+
+    let scale = TARGET_WIDTH / diagramWidth;
+    if (scale < MIN_SCALE) scale = MIN_SCALE;
+    if (scale > MAX_SCALE) scale = MAX_SCALE;
+
+    const exportWidth  = Math.round(diagramWidth  * scale);
+    const exportHeight = Math.round(diagramHeight * scale);
+
+    // 3. Cloner le SVG pour l'export
+    const clonedSvg = svg.cloneNode(true);
+    clonedSvg.setAttribute('width',  exportWidth);
+    clonedSvg.setAttribute('height', exportHeight);
+    clonedSvg.setAttribute(
+        'viewBox',
+        `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
+    );
+
+    // Nettoyer d'éventuels <image href="http://..."> qui repollueraient le canvas
+    const images = clonedSvg.querySelectorAll('image');
+    images.forEach(node => {
+        const href = node.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+                  || node.getAttribute('href');
+        if (href && !href.startsWith('data:')) {
+            console.warn('Image externe supprimée du SVG pour éviter CORS :', href);
+            node.parentNode.removeChild(node);
+        }
+    });
+    
+    // 4. Sérialiser le SVG en data URL
+    const serializer = new XMLSerializer();
+    let svgString = serializer.serializeToString(clonedSvg);
+    if (!svgString.startsWith('<?xml')) {
+        svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
+    }
+
+    const svgBase64 = window.btoa(unescape(encodeURIComponent(svgString)));
+    const svgDataUrl = `data:image/svg+xml;base64,${svgBase64}`;
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    img.onload = function () {
+        const canvas = document.createElement('canvas');
+        canvas.width  = exportWidth;
+        canvas.height = exportHeight;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            return;
+        }
+
+        // Fond blanc pour un rendu propre dans les documents (évite fond sombre/transp.)
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, exportWidth, exportHeight);
+        ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
+
+        try {
+            canvas.toBlob(function (blob) {
+                if (!blob) {
+                    alert("Impossible de générer le PNG (blob nul).");
+                    return;
+                }
+                const pngUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = pngUrl;
+
+                const now = new Date();
+                const yyyy = now.getFullYear();
+                const mm = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const hh = String(now.getHours()).padStart(2, '0');
+                const mi = String(now.getMinutes()).padStart(2, '0');
+
+                a.download = `logigramme_${yyyy}${mm}${dd}_${hh}${mi}.png`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(pngUrl);
+            }, 'image/png');
+        } catch (err) {
+            console.error('Erreur lors de toBlob (CORS probable) :', err);
+            alert("Le navigateur bloque l’export PNG pour des raisons de sécurité (CORS).");
+        }
+    };
+
+    img.onerror = function (e) {
+        console.error('Erreur chargement image SVG :', e);
+        alert("Impossible de convertir le diagramme en PNG.");
+    };
+
+    img.src = svgDataUrl;
 }
 
-/**********************************************************/
-/**********************************************************/
-// --- Point d'entrée principal de l'application ---
+// --- Gestion des événements pour les boutons et éléments de l'interface ---
 document.addEventListener('DOMContentLoaded', function() {
-
     // --- Gestion du Thème (Dark/Light) ---
-    const themeToggleBtn = document.getElementById('theme-toggle'); // Assurez-vous que ce bouton existe dans layout.html
+    const themeToggleBtn = document.getElementById('theme-toggle');
     
     // Appliquer le thème sauvegardé au chargement
     const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -1240,6 +1335,17 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // --- Boutons de changement de taille de police (CodeMirror) ---
+    const fontDecreaseBtn = document.getElementById('font-decrease-btn');
+    const fontIncreaseBtn = document.getElementById('font-increase-btn');
+
+    if (fontDecreaseBtn) {
+        fontDecreaseBtn.addEventListener('click', () => changeFontSize(-2));
+    }
+    if (fontIncreaseBtn) {
+        fontIncreaseBtn.addEventListener('click', () => changeFontSize(+2));
+    }
+
     // --- Gestionnaire pour "Générer un Code Aléatoire" ---
     const generateCodeButton = document.getElementById('generate-code-btn');
     if (generateCodeButton) {
@@ -1339,7 +1445,7 @@ document.addEventListener('DOMContentLoaded', function() {
         console.warn("Bouton 'generate-code-btn' non trouvé.");
     }
 
-    const predefinedExamplesList = document.getElementById('predefined-examples-list');
+    const predefinedExamplesList = document.getElementById('predefined-code-list');
     if (predefinedExamplesList) {
         predefinedExamplesList.querySelectorAll('a[data-example-index]').forEach(link => {
             link.addEventListener('click', function() {
@@ -1353,8 +1459,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const loadPredefinedCodeBtn = document.getElementById('load-predefined-code-btn');
 
-    if (predefinedExamplesList && typeof PREDEFINED_EXAMPLES !== 'undefined' && PREDEFINED_EXAMPLES.length > 0) {
-        PREDEFINED_EXAMPLES.forEach((example, index) => {
+    // On vérifie window.PREDEFINED_EXAMPLES ou la variable globale
+    const examples = window.PREDEFINED_EXAMPLES || (typeof PREDEFINED_EXAMPLES !== 'undefined' ? PREDEFINED_EXAMPLES : []);
+
+    if (predefinedExamplesList && examples.length > 0) {
+        examples.forEach((example, index) => {
             const listItem = document.createElement('li');
             const link = document.createElement('a');
             link.className = 'dropdown-item';
@@ -1364,24 +1473,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
             link.addEventListener('click', function(e) {
                 e.preventDefault();
-                const exampleIndex = parseInt(this.dataset.exampleIndex);
-                const selectedExample = PREDEFINED_EXAMPLES[exampleIndex];
+                // On récupère l'exemple depuis la source sûre
+                const selectedExample = (window.PREDEFINED_EXAMPLES || PREDEFINED_EXAMPLES)[this.dataset.exampleIndex];
+                
                 if (selectedExample && codeEditorInstance) {
-                    
-                    if (typeof logLoadExample === 'function') {
-                        logLoadExample(selectedExample.name);
-                    }
+                    console.log("Chargement de l'exemple :", selectedExample.name);
                     lastDiagramAstDump = "";
                     codeEditorInstance.setValue(selectedExample.code);
                     memorizeLoadedCode(selectedExample.code);
                     setDiagramAndChallengeCardState("default");
-                    console.log(`Exemple chargé et mémorisé: ${selectedExample.name}. Diagramme invalidé.`);
-                    if (typeof resetChallengeInputs === 'function') {
-                        resetChallengeInputs(challengeVariablesContainer);
-                    }
-                    document.getElementById('check-answers-btn').disabled = true;
-                    document.getElementById('show-solution-btn').disabled = true;
-                    document.getElementById('flowchart').innerHTML = '<p class="text-center text-muted mt-3">Code chargé. Cliquez sur "Lancer..." pour voir le diagramme et le défi.</p>';
+                    resetChallengeInputs(challengeVariablesContainer);
                 }
             });
             listItem.appendChild(link);
@@ -1587,7 +1688,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Mettre à jour l'interface du défi avec les résultats.
                 if (typeof populateChallengeInputs === 'function') {
                     populateChallengeInputs(variableValuesFromExecution, challengeVariablesContainer);
+                    // Juste après avoir rempli le défi, on réapplique la taille de police
+                    applyCurrentFontSize(); 
                 }
+                // Ré-appliquer la taille de police courante au Défi
+                applyCurrentFontSize();
                 const hasVariables = Object.keys(variableValuesFromExecution).length > 0;
                 if (checkAnswersButton) checkAnswersButton.disabled = !hasVariables;
                 if (showSolutionButton) showSolutionButton.disabled = !hasVariables;
@@ -1689,4 +1794,288 @@ document.addEventListener('DOMContentLoaded', function() {
     updateGlobalConfigSelectors();
     handleVisualInterdependencies();
     initializeUI();
+
+    // Appliquer la taille de police initiale à l'éditeur ET à la section Défi
+    applyCurrentFontSize();
+
+    // --- Export PNG du logigramme ---
+    const exportPngBtn = document.getElementById('diagram-export-png-btn');
+    if (exportPngBtn) {
+        exportPngBtn.addEventListener('click', () => {
+            console.log("Export PNG cliqué");
+            exportFlowchartAsPng();
+        });
+    } else {
+        console.warn("Bouton #diagram-export-png-btn introuvable.");
+    }
+}); // <--- FIN DU DOMContentLoaded
+
+/**
+ * Gère la fonction input() de Python en affichant un modal.
+ * Retourne une Promise qui se résout avec la saisie de l'utilisateur.
+ * @param {string} prompt Le message à afficher à l'utilisateur.
+ * @returns {Promise<string>}
+ */
+function handlePythonInput(prompt) {
+    console.log("DEBUG : Appel à handlePythonInput avec prompt:", prompt);
+    const inputModal = new bootstrap.Modal(document.getElementById('input-modal'));
+    const promptElement = document.getElementById('input-modal-prompt');
+    const inputField = document.getElementById('input-modal-field');
+    const submitButton = document.getElementById('input-modal-submit-btn');
+
+    if(promptElement) promptElement.textContent = prompt || "";
+    if(inputField) inputField.value = '';
+
+    return new Promise((resolve) => {
+        const submitListener = () => {
+            const value = inputField.value;
+            submitButton.removeEventListener('click', submitListener);
+            inputField.removeEventListener('keydown', enterListener);
+            inputModal.hide();
+            resolve(value);
+        };
+
+        const enterListener = (event) => {
+            if (event.key === 'Enter') {
+                submitListener();
+            }
+        };
+
+        submitButton.addEventListener('click', submitListener);
+        inputField.addEventListener('keydown', enterListener);
+
+        document.getElementById('input-modal').addEventListener('shown.bs.modal', () => {
+            inputField.focus();
+        }, { once: true });
+
+        inputModal.show();
+    });
+}
+
+
+// ==========================================
+// GESTION DE L'INTERFACE UTILISATEUR (UI)
+// ==========================================
+
+// --- (en 1. la taille de police déplacée plus haut) ---
+// --- 2. SPLITTER (Redimensionnement Manuel) ---
+document.addEventListener('DOMContentLoaded', function() {
+    initResizer();
 });
+
+function initResizer() {
+    const resizer = document.getElementById('resizer');
+    const leftSide = document.getElementById('col-editor');
+    const rightSide = document.getElementById('col-diagram');
+    const container = document.getElementById('workspace-container');
+
+    if (!resizer || !leftSide || !rightSide) return;
+
+    let x = 0;
+    let leftWidth = 0;
+
+    // Gestionnaire souris enfoncée
+    const mouseDownHandler = function(e) {
+        // On ajoute une classe pour figer les largeurs
+        container.classList.add('split-active');
+        resizer.classList.add('active');
+        
+        x = e.clientX;
+        leftWidth = leftSide.getBoundingClientRect().width;
+
+        // On attache les événements au document pour ne pas perdre le focus si la souris sort
+        document.addEventListener('mousemove', mouseMoveHandler);
+        document.addEventListener('mouseup', mouseUpHandler);
+        
+        // UX : Empêcher la sélection de texte et forcer le curseur
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'col-resize';
+        
+        // Masquer l'iframe de CodeMirror ou les éléments qui capturent la souris (optionnel)
+        leftSide.style.pointerEvents = 'none';
+        rightSide.style.pointerEvents = 'none';
+    };
+
+    // Gestionnaire mouvement souris
+    const mouseMoveHandler = function(e) {
+        const dx = e.clientX - x;
+        const newLeftWidth = leftWidth + dx;
+        const containerWidth = container.getBoundingClientRect().width;
+        
+        // Calcul en pourcentage pour le responsive
+        const newLeftPercent = (newLeftWidth / containerWidth) * 100;
+        const newRightPercent = 100 - newLeftPercent;
+
+        // Limites de sécurité (min 15%, max 85%)
+        if (newLeftPercent > 15 && newLeftPercent < 85) {
+            // On soustrait la largeur du resizer (environ 1%) du côté droit
+            leftSide.style.width = `${newLeftPercent}%`;
+            rightSide.style.width = `calc(${newRightPercent}% - 10px)`; 
+        }
+        
+        // Note : On ne refresh pas CodeMirror/Mermaid à chaque pixel pour la perf,
+        // on le fera au mouseUp.
+    };
+
+    // Gestionnaire souris relâchée
+    const mouseUpHandler = function() {
+        resizer.classList.remove('active');
+        document.body.style.removeProperty('user-select');
+        document.body.style.removeProperty('cursor');
+        leftSide.style.removeProperty('pointer-events');
+        rightSide.style.removeProperty('pointer-events');
+
+        document.removeEventListener('mousemove', mouseMoveHandler);
+        document.removeEventListener('mouseup', mouseUpHandler);
+        
+        // Rafraîchissement final des composants graphiques
+        if (codeEditorInstance) codeEditorInstance.refresh();
+        if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
+            panZoomInstance.resize();
+            panZoomInstance.fit();
+            panZoomInstance.center();
+        }
+    };
+
+    resizer.addEventListener('mousedown', mouseDownHandler);
+}
+
+// --- 3. TOGGLE VIEW (Basculer les vues) ---
+function switchView(mode) {
+    const colEditor = document.getElementById('col-editor');
+    const colDiagram = document.getElementById('col-diagram');
+    const resizer = document.getElementById('resizer');
+    const container = document.getElementById('workspace-container');
+
+    // Réinitialisation propre
+    container.classList.remove('split-active');
+    colEditor.style.width = '';
+    colDiagram.style.width = '';
+    colEditor.classList.remove('col-full', 'col-hidden');
+    colDiagram.classList.remove('col-full', 'col-hidden');
+    
+    // Gestion de l'affichage du resizer (visible seulement en split desktop)
+    resizer.classList.remove('d-none'); 
+    resizer.classList.add('d-lg-block');
+
+    if (mode === 'code') {
+        colEditor.classList.add('col-full');
+        colDiagram.classList.add('col-hidden');
+        resizer.classList.add('d-none'); // Cacher resizer
+        resizer.classList.remove('d-lg-block');
+    } else if (mode === 'chart') {
+        colEditor.classList.add('col-hidden');
+        colDiagram.classList.add('col-full');
+        resizer.classList.add('d-none'); // Cacher resizer
+        resizer.classList.remove('d-lg-block');
+    } else {
+        // Mode Split (Défaut)
+        // On laisse Bootstrap gérer ou le resizer si utilisé
+    }
+
+    // Rafraîchissement après transition (petit délai pour laisser le DOM s'ajuster)
+    setTimeout(() => {
+        if (codeEditorInstance) codeEditorInstance.refresh();
+        if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
+            panZoomInstance.resize();
+            panZoomInstance.fit();
+            panZoomInstance.center();
+        }
+    }, 50);
+}
+
+// pour le rendre explicitement global (optionnel)
+window.switchView = switchView;
+
+// --- PLEIN ÉCRAN ---
+window.toggleFullScreen = function() {
+    const elem = document.getElementById('flowchart');
+    if (!elem) return;
+    if (!document.fullscreenElement) {
+        if (elem.requestFullscreen) elem.requestFullscreen();
+        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen();
+        elem.classList.add('is-fullscreen');
+    } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+        elem.classList.remove('is-fullscreen');
+    }
+};
+
+document.addEventListener('fullscreenchange', () => {
+    if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
+        setTimeout(() => { panZoomInstance.resize(); panZoomInstance.fit(); panZoomInstance.center(); }, 100);
+    }
+});
+
+// --- 4. RESIZER HORIZONTAL (Hauteur synchronisée des cartes) ---
+document.addEventListener('DOMContentLoaded', function() {
+    initHorizontalResizer();
+});
+
+function initHorizontalResizer() {
+    const hResizer = document.getElementById('horizontal-resizer');
+    if (!hResizer) return;
+
+    // Les 2 card-body que l’on veut redimensionner ensemble
+    const editorCardBody   = document.querySelector('#col-editor .card-body');
+    const diagramCardBody  = document.querySelector('#col-diagram .card-body');
+
+    if (!editorCardBody || !diagramCardBody) return;
+
+    let startY = 0;
+    let startHeight = 0;
+
+    const minHeight = 250; // hauteur minimale (px)
+    const maxHeightRatio = 0.8; // 80% de la hauteur de la fenêtre
+
+    const mouseDownHandler = function(e) {
+        startY = e.clientY;
+
+        // On prend la hauteur actuelle de l’éditeur comme référence
+        startHeight = editorCardBody.getBoundingClientRect().height;
+
+        hResizer.classList.add('active');
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'row-resize';
+
+        document.addEventListener('mousemove', mouseMoveHandler);
+        document.addEventListener('mouseup', mouseUpHandler);
+    };
+
+    const mouseMoveHandler = function(e) {
+        const dy = e.clientY - startY;
+        let newHeight = startHeight + dy;
+
+        const maxHeight = window.innerHeight * maxHeightRatio;
+
+        if (newHeight < minHeight) newHeight = minHeight;
+        if (newHeight > maxHeight) newHeight = maxHeight;
+
+        editorCardBody.style.height  = `${newHeight}px`;
+        diagramCardBody.style.height = `${newHeight}px`;
+
+        // On ne refresh pas CodeMirror / Mermaid à chaque pixel (perf),
+        // on le fera au mouseUp.
+    };
+
+    const mouseUpHandler = function() {
+        hResizer.classList.remove('active');
+        document.body.style.removeProperty('user-select');
+        document.body.style.removeProperty('cursor');
+
+        document.removeEventListener('mousemove', mouseMoveHandler);
+        document.removeEventListener('mouseup', mouseUpHandler);
+
+        // Rafraîchissement final
+        if (window.codeEditorInstance && codeEditorInstance.refresh) {
+            codeEditorInstance.refresh();
+        }
+        if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
+            panZoomInstance.resize();
+            panZoomInstance.fit();
+            panZoomInstance.center();
+        }
+    };
+
+    hResizer.addEventListener('mousedown', mouseDownHandler);
+}

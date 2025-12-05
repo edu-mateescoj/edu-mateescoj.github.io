@@ -10,8 +10,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Outil de Création d'Exercices Python</title>
     
+    <!-- Hack pour activer SharedArrayBuffer sur GitHub Pages (supprime les warnings Pyodide) -->
+    <script src="coi-serviceworker.js"></script>
+    
     <!-- Inclusion de Pyodide EN PREMIER -->
     <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+    
+    <!-- Inclusion de svg-pan-zoom pour la navigation dans le diagramme -->
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 
     <!-- Inclusion de Bootstrap - thèem Replit - pour le style -->
     <!--<link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">-->
@@ -32,9 +38,8 @@
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10.2.4/dist/mermaid.min.js"></script>
     
     <!-- Inclusion du CSS personnalisé -->
-    <!--
-    <link rel="stylesheet" href="../static/css/styles.css">
--->
+    
+
     <!-- <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}"> -->
     <link rel="stylesheet" href="css/styles.css">
      
@@ -399,52 +404,103 @@
                             </div>
                         </div>
                     </div>
-                    <div class="d-flex gap-2 mb-3"> <!-- Wrapper pour les deux boutons -->
-                        <!-- Bouton pour générer un code aléatoire -->
+                    <!-- DANS LA PREMIÈRE CARTE (Générateur) -->
+                    <!-- On remplace le bloc de boutons existant par celui-ci -->
+                    <div class="d-flex gap-2 mb-3 flex-wrap align-items-center"> 
+                        <!-- Bouton Générer -->
                         <button id="generate-code-btn" class="btn btn-primary d-flex align-items-center">
-                            <i class="fas fa-random me-2"></i> Générer un Code Aléatoire
+                            <i class="fas fa-random me-2"></i> Générer
                         </button>
 
+                        <!-- Bouton Charger -->
                         <div class="dropdown">
                             <button class="btn btn-info d-flex align-items-center dropdown-toggle" type="button" id="load-predefined-code-btn" data-bs-toggle="dropdown" aria-expanded="false">
-                                <i class="fas fa-file-code me-2"></i> Charger un Exemple
+                                <i class="fas fa-file-code me-2"></i> Exemples
                             </button>
-                            <ul class="dropdown-menu" aria-labelledby="load-predefined-code-btn" id="predefined-examples-list">
-                                <!-- Les exemples seront peuplés par JavaScript -->
-                                <!-- <li><a class="dropdown-item" href="#">Exemple 1</a></li> -->
+                            <ul class="dropdown-menu" aria-labelledby="load-predefined-code-btn" id="predefined-code-list">
+                                <!-- Liste peuplée par JS -->
                             </ul>
-                        </div> <!-- fin du 2ème bouton -->
-                    </div> <!-- fin du wrapper des 2 boutons -->
-                </div> <!-- Fin du .card principal -->
-            </div> <!-- Fin .col-12 -->
-        </div> <!-- Fin .row mb-4 -->
+                        </div>
+
+                        <!-- ESPACE FLEXIBLE : Pousse le bouton suivant tout à droite -->
+                        <div class="flex-grow-1"></div>
+
+                        <!-- BOUTON LANCER (Déplacé ici) -->
+                        <button id="run-code-btn" class="btn btn-success d-flex align-items-center shadow-sm">
+                            <i class="fas fa-play me-2"></i> <span class="d-none d-sm-inline">Lancer le Traitement</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
         <!-- Fin de la section  -->
- 
+
+<!-- Boutons de mode d'affichage -->
+<div class="row mb-2 justify-content-center">
+    <div class="col-auto">
+        <div class="btn-group shadow-sm" role="group" aria-label="Mode d'affichage">
+            <input type="radio" class="btn-check" name="viewMode" id="view-code"
+                   autocomplete="off" onclick="switchView('code')">
+            <label class="btn btn-outline-secondary" for="view-code" title="Code uniquement">
+                <i class="fas fa-code me-1"></i> Code
+            </label>
+
+            <input type="radio" class="btn-check" name="viewMode" id="view-split"
+                   autocomplete="off" checked onclick="switchView('split')">
+            <label class="btn btn-outline-secondary" for="view-split" title="Vue partagée">
+                <i class="fas fa-columns me-1"></i> Partagé
+            </label>
+
+            <input type="radio" class="btn-check" name="viewMode" id="view-chart"
+                   autocomplete="off" onclick="switchView('chart')">
+            <label class="btn btn-outline-secondary" for="view-chart" title="Diagramme uniquement">
+                <i class="fas fa-project-diagram me-1"></i> Diagramme
+            </label>
+        </div>
+    </div>
+</div>
+        
+
 <!-- Card section for code execution and flowchart display -->
-<div class="row mb-4">
-    <div class="col-lg-6 mb-4 mb-lg-0">
+<div class="row mb-4" id="workspace-container">
+    <!-- COLONNE ÉDITEUR -->
+    <div class="col-lg-6 mb-3 mb-lg-0" id="col-editor">
         <div class="card h-100">
             <!-- En-tête de la carte : Code Python -->
             <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center flex-wrap">
                 <!-- Titre de la carte -->
-                <h2 class="h5 mb-0">Code Python</h2>
-                <div class="d-flex align-items-center mt-2 mt-sm-0">
-                    <!-- Bouton pour exécuter le code -->
-                    <button id="run-code-btn" class="btn btn-sm btn-success">
-                        <i class="fas fa-play me-1"></i> Lancer le diagramme et les défis
-                    </button>
+                <h2 class="h5 mb-0">Éditeur Python</h2>
+
+                <!-- Zone droite : boutons taille police + run (même flex que ta version) -->
+                <div class="d-flex align-items-center mt-2 mt-sm-0 gap-2">
+                    <!-- Contrôles taille police éditeur -->
+                    <div class="btn-group" role="group" aria-label="Taille police éditeur">
+                        <button id="font-decrease-btn" class="btn btn-sm btn-outline-light" title="Réduire la taille du texte">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <button id="font-increase-btn" class="btn btn-sm btn-outline-light" title="Augmenter la taille du texte">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>                    
+                    
                 </div>
             </div>
-            <div class="card-body">
-                <!-- Message pour les petits écrans -->
-                <div class="mb-2 d-md-none">
+
+            <!-- CHANGÉ : body en flex colonne avec hauteur contrôlée -->
+            <div class="card-body p-0 d-flex flex-column" style="height: 500px; min-height: 350px;">
+                
+                <!-- Message mobile -->
+                <div class="mb-1 d-md-none px-3 pt-2">
                     <small class="text-muted">
                         <i class="fas fa-info-circle me-1"></i> Faites pivoter votre appareil pour une meilleure expérience d'édition
                     </small>
                 </div>
-                <!-- Zone d'édition de code -->
-                <textarea id="code-editor"></textarea>
-                <!-- <div id="code-toolbar" class="d-flex align-items-center justify-content-start py-1 px-2" style="background: #23272b; border-radius: 0 0 0.25rem 0.25rem; border-top: 1px solid #444; font-size: 1rem;">-->
+
+                <!-- Zone CodeMirror : flex-grow pour remplir tout l’espace -->
+                <div class="flex-grow-1 px-2 pb-2">
+                    <textarea id="code-editor"></textarea>
+                </div>       
+
                 <!-- Toolbar avec fond gris (bg-secondary) et texte blanc (text-white) pour forcer le contraste -->
                 <div id="code-toolbar" class="d-flex align-items-center justify-content-start py-1 px-2 bg-secondary text-white">
                     
@@ -469,30 +525,66 @@
                     <button id="reload-code-btn" class="btn btn-sm btn-outline-light" title="Restaurer le code à la dernière génération/chargement">
                         <i class="fas fa-undo"></i>
                     </button>
-
                 </div>
             </div>
         </div>
     </div>
     
-    <div class="col-lg-6">
-        <div class="card h-100">
-            <!-- En-tête de la carte : Représentation en Diagramme -->
-            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-                <!-- Titre de la carte -->
-                <h2 class="h5 mb-0">Représentation en Diagramme</h2>
-                <span class="badge bg-dark d-none d-sm-inline">Algorithme Visuel</span>
+    <!-- RESIZER -->
+    <div id="resizer" class="d-none d-lg-block"></div>
+
+<!-- COLONNE DIAGRAMME -->
+<div class="col-lg-6" id="col-diagram">
+    <div class="card h-100">
+        <!-- En-tête de la carte -->
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <!-- Titre de la carte -->
+            <h2 class="h5 mb-0">Logigramme</h2>
+
+            <!-- Groupe de boutons aligné à droite dans le header,
+                 même principe que les boutons +/- de "Éditeur Python" -->
+            <div class="btn-group btn-group-sm" role="group" aria-label="Outils du diagramme">
+                <!-- Export PNG -->
+                <button id="diagram-export-png-btn"
+                        type="button"
+                        class="btn btn-outline-light"
+                        title="Exporter le logigramme en PNG">
+                    <i class="fas fa-file-image"></i>
+                </button>
+
+                <!-- Plein écran -->
+                <button id="diagram-fullscreen-btn"
+                        type="button" 
+                        class="btn btn-outline-light"
+                        onclick="toggleFullScreen()"
+                        title="Afficher le logigramme en plein écran">
+                    <i class="fas fa-expand"></i>
+                </button>
             </div>
-            <div class="card-body overflow-auto">
+        </div>
+            
+            <!-- Corps de la carte -->
+            <div class="card-body overflow-hidden position-relative p-0 border-top border-light" style="height: 500px;">
+                <!-- Barre d'outils flottante pour le zoom -->
+                <div id="zoom-controls" class="position-absolute top-0 end-0 m-2 btn-group-vertical" style="z-index: 10; display: none;">
+                    <button class="btn btn-sm btn-light border" onclick="zoomIn()" title="Zoom Avant"><i class="fas fa-plus"></i></button>
+                    <button class="btn btn-sm btn-light border" onclick="resetZoom()" title="Réinitialiser"><i class="fas fa-compress-arrows-alt"></i></button>
+                    <button class="btn btn-sm btn-light border" onclick="zoomOut()" title="Zoom Arrière"><i class="fas fa-minus"></i></button>
+                </div>
+
                 <!-- Conteneur pour le diagramme Mermaid -->
-                <div id="flowchart" class="mermaid-container"></div>
+                <!-- On retire 'overflow-auto' car c'est la lib qui gère le mouvement maintenant -->
+                <div id="flowchart" class="mermaid-container h-100 w-100"></div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Section Défi  -->
-<div class="row">
+<!-- RESIZER HORIZONTAL POUR LA HAUTEUR DES CARTES -->
+<div id="horizontal-resizer"></div>
+
+<!-- Section Défi Élève -->
+<div class="row mt-1">
     <div class="col-12">
         <div class="card">
             <!-- En-tête de la carte : Défi  -->
