@@ -81,7 +81,8 @@ let currentFontSize = 16;
 /**
  * Applique la taille de police courante (currentFontSize) à
  * - l'éditeur CodeMirror
- * - la section "Défi" (#variables-container)
+ * - la section "Défi" (#variables-container) et ses enfants
+ * - la Console d'Exécution (#execution-console-output)
  */
 function applyCurrentFontSize() {
     // Éditeur
@@ -109,6 +110,17 @@ function applyCurrentFontSize() {
             el.style.cssText += `; font-size: ${currentFontSize}px !important;`;
         });
     }
+    // Console d'Exécution
+    const consoleOutput = document.getElementById('execution-console-output');
+
+    if (consoleOutput) {
+        consoleOutput.style.fontSize = currentFontSize + "px";
+        // la console est un <pre>, donc l etexte hérité devrait suivre, mais on force au cas où
+        const consoleElements = consoleOutput.querySelectorAll('*'); // tous les enfants
+        consoleElements.forEach(el => {
+            el.style.cssText += `; font-size: ${currentFontSize}px !important;`;// on force avec !important
+        });
+    }   
 }
 
 function changeFontSize(delta) {

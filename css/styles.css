@@ -408,3 +408,9 @@ body, .card, .btn, .form-control {
 #variables-container .form-control {
     font-size: inherit !important;
 }
+/* Console d'Exécution : hérite aussi de la taille JS */
+#execution-console-output,
+#execution-console-output div,
+#execution-console-output pre {
+    font-size: inherit !important;
+}
