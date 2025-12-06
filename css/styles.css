@@ -42,6 +42,44 @@
     --mermaid-line: #333333;
 }
 
+/* --- Styles Défi : Mode Clair (Solarized) --- */
+[data-bs-theme="light"] #variables-container .input-group-text {
+    background-color: #eee8d5;             /* Fond Solarized Base2 */
+    color: #657b83;                        /* Texte Solarized Base00 */
+    border-color: #93a1a1;
+}
+
+[data-bs-theme="light"] #variables-container .form-control {
+    background-color: #fdf6e3;             /* Fond Solarized Base3 (Clair) */
+    color: #2aa198;                        /* Cyan (pour les valeurs) */
+    border-color: #93a1a1;
+}
+
+/* Focus : Bordure bleue (Solarized) */
+[data-bs-theme="light"] #variables-container .form-control:focus {
+    border-color: #268bd2;
+    box-shadow: 0 0 0 0.25rem rgba(38, 139, 210, 0.25);
+}
+
+/* --- Styles Défi : Mode Sombre (Dracula) --- */
+[data-bs-theme="dark"] #variables-container .input-group-text {
+    background-color: var(--bg-card);      /* Fond gris foncé */
+    color: var(--syntax-variable);         /* Texte blanc/ivoire */
+    border-color: var(--border-color);
+}
+
+[data-bs-theme="dark"] #variables-container .form-control {
+    background-color: var(--bg-body);      /* Fond très foncé (comme l'éditeur) */
+    color: var(--syntax-string);           /* Jaune pâle ou Vert (pour les valeurs saisies) */
+    border-color: var(--border-color);
+}
+
+/* Focus : Bordure rose (Dracula) */
+[data-bs-theme="dark"] #variables-container .form-control:focus {
+    border-color: var(--syntax-keyword);
+    box-shadow: 0 0 0 0.25rem rgba(255, 121, 198, 0.25);
+}
+
 /* --- 1. CODEMIRROR : Agrandissement & Couleurs Forcées --- */
 .CodeMirror {
     /* On force la hauteur à 100% du conteneur parent */
@@ -403,9 +441,11 @@ body, .card, .btn, .form-control {
 #variables-container .col-lg-4,
 #variables-container .col-md-6,
 #variables-container .col-sm-12,
-#variables-container .input-group,
+#variables-container input,
 #variables-container .input-group-text,
+#variables-container label,
 #variables-container .form-control {
+    font-family: inherit;
     font-size: inherit !important;
 }
 /* Console d'Exécution : hérite aussi de la taille JS */
@@ -413,4 +453,58 @@ body, .card, .btn, .form-control {
 #execution-console-output div,
 #execution-console-output pre {
     font-size: inherit !important;
+}
+
+/* --- UNIFICATION SECTION DÉFI --- */
+
+/* 1. Police Monospace (comme l'éditeur) */
+#variables-container {
+    font-family: 'Fira Code', 'Consolas', monospace !important;
+}
+
+/* 2. Thème Sombre (Dracula) */
+[data-bs-theme="dark"] #variables-container .input-group-text {
+    background-color: #282a36 !important; /* Fond sombre */
+    color: #ff79c6 !important;            /* Rose (Keyword) */
+    border-color: #6272a4;
+}
+[data-bs-theme="dark"] #variables-container .form-control {
+    background-color: #282a36 !important;
+    color: #f1fa8c !important;            /* Jaune (String) */
+    border-color: #6272a4;
+}
+
+/* 3. Thème Clair (Haut Contraste - Daltonien) */
+[data-bs-theme="light"] #variables-container .input-group-text {
+    background-color: #ffffff !important;
+    color: #000000 !important;            /* Noir pur */
+    border: 1px solid #000000 !important; /* Bordure noire franche */
+    font-weight: bold;
+}
+[data-bs-theme="light"] #variables-container .form-control {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    border: 1px solid #000000 !important;
+}
+
+/* --- UNIFICATION DES EN-TÊTES (ANTI-CIRQUE) --- */
+
+/* On écrase les classes Bootstrap (bg-info, bg-secondary, etc.) pour unifier le look */
+.card-header {
+    border-bottom: 1px solid var(--border-color) !important;
+    font-family: 'Segoe UI', sans-serif; /* Police lisible pour les titres */
+    font-weight: 600;
+}
+
+/* Thème Sombre : En-têtes gris foncé bleuté (Dracula Selection) */
+[data-bs-theme="dark"] .card-header {
+    background-color: #44475a !important; 
+    color: #ffffff !important;
+}
+
+/* Thème Clair : En-têtes gris clair neutre (Haut Contraste) */
+[data-bs-theme="light"] .card-header {
+    background-color: #e9ecef !important; /* Gris clair standard */
+    color: #212529 !important;            /* Noir presque pur */
+    border-bottom: 1px solid #ced4da !important;
 }
