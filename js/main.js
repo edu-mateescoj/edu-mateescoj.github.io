@@ -1105,6 +1105,88 @@ function clearConsole() {
 }
 
 /**
+ * Injecte dans un SVG un <style> contenant les règles CSS critiques
+ * pour que le rendu PNG soit cohérent avec l'UI.
+ */
+function injectMermaidStylesIntoSvg(svg) {
+    const styleContent = `
+         .node rect, 
+         .node polygon, 
+         .node circle,
+         .node path  {
+            fill: #ffffff;
+            stroke: #000000;
+            stroke-width: 2px;
+        }
+         .edgePath .path,
+         .flowchart-link  {
+            stroke: #000000;
+            stroke-width: 2px;
+            fill: none;
+        }
+         marker, 
+         marker path,
+         marker circle  {
+            fill: #000000;
+            stroke: #000000;
+        }
+         .cluster rect {
+            fill: none;
+            stroke: #000000;
+            stroke-width: 1px;
+            opacity: 0.4;
+        }
+         .node .label, 
+         .node .nodeLabel,
+         .cluster text,
+         .edgeLabel,
+         foreignObject div {
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 16px;
+            font-weight: 500;
+            fill: #000000;
+            stroke: none;
+        }
+    `;
+
+    const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+    styleEl.setAttribute('type', 'text/css');
+    styleEl.textContent = styleContent;
+
+    // IMPORTANT : utiliser les valeurs calculées actuelles des variables CSS
+    const rootStyles = getComputedStyle(document.documentElement);
+    styleEl.textContent = styleEl.textContent
+        .replace(/var\(--mermaid-node-bg\)/g, rootStyles.getPropertyValue('--mermaid-node-bg').trim())
+        .replace(/var\(--mermaid-node-border\)/g, rootStyles.getPropertyValue('--mermaid-node-border').trim())
+        .replace(/var\(--mermaid-line\)/g, rootStyles.getPropertyValue('--mermaid-line').trim())
+        .replace(/var\(--mermaid-text\)/g, rootStyles.getPropertyValue('--mermaid-text').trim());
+
+    // Insérer en tête du SVG
+    const firstChild = svg.firstChild;
+    if (firstChild) {
+        svg.insertBefore(styleEl, firstChild);
+    } else {
+        svg.appendChild(styleEl);
+    }
+}
+
+function cleanInlineMermaidStyles(svg) {
+    // 1) Enlever tout attribut style=* qui fixe fill/stroke
+    svg.querySelectorAll('[style]').forEach(el => {
+        el.removeAttribute('style');
+    });
+
+    // 2) Normaliser fill/stroke sur les noeuds/edges :
+    svg.querySelectorAll('rect, polygon, circle, path').forEach(el => {
+        el.removeAttribute('fill');
+        el.removeAttribute('stroke');
+    });
+
+    // 3) Supprimer les anciens <style> internes Mermaid
+    svg.querySelectorAll('style').forEach(el => el.parentNode.removeChild(el));
+}
+
+/**
  * Exporte le diagramme Mermaid actuel (#flowchart) en PNG
  * avec une taille "document-friendly":
  * - largeur visée ~900px
@@ -1133,25 +1215,31 @@ async function exportFlowchartAsPng() {
     }
 
     // 2. Calculer un facteur d'échelle "raisonnable"
-    const TARGET_WIDTH = 900;   // Taille idéale pour insertion dans un document
-    const MIN_SCALE    = 0.8;   // Ne pas trop réduire les gros diagrammes
-    const MAX_SCALE    = 1.8;   // Ne pas sur-agrandir les minuscules
+    const TARGET_WIDTH = 1200;   // Taille idéale pour insertion dans un document
+    const MIN_SCALE    = 1.0;   // Ne pas trop réduire les gros diagrammes
+    const MAX_SCALE    = 2.5;   // Ne pas sur-agrandir les minuscules
 
     let scale = TARGET_WIDTH / diagramWidth;
     if (scale < MIN_SCALE) scale = MIN_SCALE;
     if (scale > MAX_SCALE) scale = MAX_SCALE;
 
-    const exportWidth  = Math.round(diagramWidth  * scale);
-    const exportHeight = Math.round(diagramHeight * scale);
+    // Facteur HiDPI (2x pour anti‑aliasing)
+    const DPI_SCALE = 2;
+
+    const exportWidth  = Math.round(diagramWidth  * scale * DPI_SCALE);
+    const exportHeight = Math.round(diagramHeight * scale * DPI_SCALE);
+
 
     // 3. Cloner le SVG pour l'export
     const clonedSvg = svg.cloneNode(true);
-    clonedSvg.setAttribute('width',  exportWidth);
-    clonedSvg.setAttribute('height', exportHeight);
+    clonedSvg.setAttribute('width',  exportWidth / DPI_SCALE);
+    clonedSvg.setAttribute('height', exportHeight / DPI_SCALE);
     clonedSvg.setAttribute(
         'viewBox',
         `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
     );
+    cleanInlineMermaidStyles(clonedSvg);
+    injectMermaidStylesIntoSvg(clonedSvg);
 
     // Nettoyer d'éventuels <image href="http://..."> qui repollueraient le canvas
     const images = clonedSvg.querySelectorAll('image');
@@ -1227,6 +1315,59 @@ async function exportFlowchartAsPng() {
     };
 
     img.src = svgDataUrl;
+}
+
+function exportFlowchartAsSvg() {
+    const container = document.getElementById('flowchart');
+    const svg = container ? container.querySelector('svg') : null;
+    if (!svg) {
+        alert("Aucun diagramme à exporter.");
+        return;
+    }
+
+    // 1. Cloner le SVG pour ne pas toucher à l'original
+    const clonedSvg = svg.cloneNode(true);
+
+    // 2. Injecter les styles Mermaid calculés (mêmes couleurs que l’UI)
+    cleanInlineMermaidStyles(clonedSvg);
+    injectMermaidStylesIntoSvg(clonedSvg);
+
+    // 3. Ajouter un <title> avec date/heure (métadonnée interne)
+    const now = new Date();
+    const timestamp = now.toLocaleString(); // ex. "07/12/2025, 14:32:10"
+    const titleText = `Logigramme généré le ${timestamp}`;
+
+    let titleEl = clonedSvg.querySelector('title');
+    if (!titleEl) {
+        titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        clonedSvg.insertBefore(titleEl, clonedSvg.firstChild);
+    }
+    titleEl.textContent = titleText;
+
+    // 4. Sérialiser et télécharger
+    const serializer = new XMLSerializer();
+    let svgString = serializer.serializeToString(clonedSvg);
+    if (!svgString.startsWith('<?xml')) {
+        svgString = '<?xml version="1.0" standalone="no"?>\r\n' + svgString;
+    }
+
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+
+    // Nom de fichier avec date / heure (même logique que le PNG)
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mi = String(now.getMinutes()).padStart(2, '0');
+    a.download = `logigramme_${yyyy}${mm}${dd}_${hh}${mi}.svg`;
+
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 // --- Gestion des événements pour les boutons et éléments de l'interface ---
@@ -1851,6 +1992,18 @@ document.addEventListener('DOMContentLoaded', function() {
     } else {
         console.warn("Bouton #diagram-export-png-btn introuvable.");
     }
+    
+    // --- Export SVG du logigramme ---
+    const exportSvgBtn = document.getElementById('diagram-export-svg-btn');
+    if (exportSvgBtn) {
+        exportSvgBtn.addEventListener('click', () => {
+            console.log("Export SVG cliqué");
+            exportFlowchartAsSvg();
+        });
+    } else {
+        console.warn("Bouton #diagram-export-svg-btn introuvable.");
+    }
+    
 }); // <--- FIN DU DOMContentLoaded
 
 /**
