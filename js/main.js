@@ -1032,6 +1032,49 @@ function toggleTheme() {
 }
 
 // --- Gestion de la Console et des I/O personnalisées ---
+/**
+ * Formate une erreur Python en un message lisible pour un élève.
+ * @param {string} traceback Le traceback complet de Python.
+ * @returns {string} Un message d'erreur formaté et simplifié.
+ */
+function formatPythonError(traceback) {
+    if (!traceback) return "Une erreur inconnue est survenue.";
+
+    const lines = traceback.trim().split('\n');
+    const errorLine = lines[lines.length - 1];
+
+    const match = errorLine.match(/^(\w+):\s*(.*)$/);
+    if (!match) return traceback;
+
+    const errorType = match[1];
+    const errorMessage = match[2];
+    let hint = "";
+
+    switch (errorType) {
+        case 'NameError':
+            hint = `'NameError': La variable ${errorMessage.split("'")[1]} a été utilisée avant d'avoir reçu une valeur. Avez-vous fait une faute de frappe ou oublié de l'initialiser ?`;
+            break;
+        case 'TypeError':
+            hint = "'TypeError': Vous avez essayé de faire une opération entre des types de données incompatibles. Par exemple, additionner un nombre et du texte (`5 + 'hello'`).";
+            break;
+        case 'IndexError':
+            hint = "'IndexError': Vous avez essayé d'accéder à un élément d'une liste ou d'une chaîne avec un indice qui n'existe pas. Par exemple, demander le 5ème élément d'une liste qui n'en a que 3.";
+            break;
+        case 'SyntaxError':
+            hint = `'SyntaxError': Votre code contient une erreur d'écriture. Vérifiez attentivement la ligne indiquée : les deux-points (\`:\`) à la fin des \`if\`/\`for\`/\`def\`, l'indentation (les espaces au début des lignes), et les parenthèses. Message original : ${errorMessage}`;
+            break;
+        case 'ValueError':
+            hint = `'ValueError': Une fonction a reçu un argument du bon type, mais avec une valeur inappropriée. Par exemple, \`int('abc')\`. Message original : ${errorMessage}`;
+            break;
+        case 'ZeroDivisionError':
+            hint = "'ZeroDivisionError': Vous avez tenté de diviser un nombre par zéro, ce qui est impossible en mathématiques.";
+            break;
+        default:
+            hint = "Une erreur est survenue. Lisez attentivement le message pour trouver un indice.";
+    }
+
+    return `Erreur détectée : ${errorLine}\n\n💡 Piste : ${hint}`;
+}
 
 /**
  * Affiche un message dans la console d'exécution.

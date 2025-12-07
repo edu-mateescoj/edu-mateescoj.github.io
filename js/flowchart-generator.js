@@ -327,9 +327,27 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialiser Mermaid (configuration globale si nécessaire)
     mermaid.initialize({
         startOnLoad: false, // Nous allons appeler mermaid.run() manuellement
+        // Utiliser 'base' pour laisser le CSS contrôler les couleurs
+        theme: 'base',
+        themeVariables: {
+            primaryColor: '#ffffff',
+            lineColor: '#ffffff',
+            mainBkg: 'transparent',
+            nodeBorder: '#ffffff'
+        },
         securityLevel: 'loose',
         flowchart: {
-            htmlLabels: true
+            useMaxWidth: false,
+            htmlLabels: true,     // Indispensable pour le CSS ci-dessous
+            
+            // 1. COMPACITÉ
+            curve: 'basis',      // Essaie 'linear' ou 'stepAfter' pour gagner de la place. 'basis' est le plus large.
+            nodeSpacing: 15,      // Réduit l'espace horizontal entre les noeuds (Défaut 50)
+            rankSpacing: 15,      // Réduit l'espace vertical entre les niveaux (Défaut 50)
+            padding: 5,          // Espace interne texte/bordure
+            
+            // 2. OPTIMISATION DU RENDU
+            defaultRenderer: 'dagre-d3' // Le moteur par défaut est robuste
         }
     });
 });

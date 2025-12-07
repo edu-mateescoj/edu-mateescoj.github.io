@@ -13,11 +13,11 @@
     --syntax-comment: #6272a4;  /* Gris bleu */
     --syntax-builtin: #8be9fd;  /* Cyan */
     
-    /* Mermaid Spécifique (Mode Sombre) */
-    --mermaid-node-bg: #282a36;
-    --mermaid-node-border: #bd93f9; /* Bordure violette */
-    --mermaid-text: #f8f8f2;
-    --mermaid-line: #ff79c6;        /* Liens en rose pour le contraste */
+ /* Mermaid Spécifique (Mode Sombre - Haut Contraste) */
+    --mermaid-node-bg: #282a36;     /* Fond des formes (sombre) */
+    --mermaid-node-border: #ffffff; /* Bordure BLANCHE (était violette) */
+    --mermaid-text: #ffffff;        /* Texte BLANC */
+    --mermaid-line: #ffffff;        /* Traits BLANCS (était rose) */
 }
 
 [data-bs-theme="light"] {
@@ -35,11 +35,11 @@
     --syntax-comment: #586e75;  /* Gris moyen */
     --syntax-builtin: #0056b3;  /* Bleu roi */
 
-    /* Mermaid Spécifique (Mode Clair) */
-    --mermaid-node-bg: #ffffff;
-    --mermaid-node-border: #102a43; /* Bordure foncée */
-    --mermaid-text: #000000;
-    --mermaid-line: #333333;
+/* Mermaid Spécifique (Mode Clair - Haut Contraste) */
+    --mermaid-node-bg: #ffffff;     /* Fond blanc */
+    --mermaid-node-border: #000000; /* Bordure NOIRE franche */
+    --mermaid-text: #000000;        /* Texte NOIR */
+    --mermaid-line: #000000;        /* Traits NOIRS */
 }
 
 /* --- Styles Défi : Mode Clair (Solarized) --- */
@@ -103,35 +103,48 @@
 
 /* --- 2. MERMAID : Agrandissement & Lisibilité --- */
 /* On cible le SVG généré par Mermaid */
-
+/* Fond transparent pour le SVG (il prendra la couleur de la carte) */
+#flowchart svg {
+    background-color: transparent !important;
+}
 /* Texte dans les formes */
+/* Textes : Titres, Labels, Commentaires */
 #flowchart svg .node .label, 
 #flowchart svg .node .nodeLabel,
+#flowchart svg .cluster text,
+#flowchart svg .edgeLabel,
 #flowchart svg foreignObject div {
     font-family: 'Segoe UI', sans-serif !important;
     font-size: 18px !important; /* Beaucoup plus grand pour la lisibilité */
     font-weight: 500;
     color: var(--mermaid-text) !important;
+    stroke: var(--mermaid-line) !important;
     line-height: 1.4;
 }
 
 /* Formes (Rectangles, Losanges) */
 #flowchart svg .node rect, 
 #flowchart svg .node polygon, 
-#flowchart svg .node circle {
+#flowchart svg .node circle,
+#flowchart svg .node path  {
     fill: var(--mermaid-node-bg) !important;
     stroke: var(--mermaid-node-border) !important;
     stroke-width: 2px !important;
 }
 
 /* Liens (Flèches) */
-#flowchart svg .edgePath .path {
+#flowchart svg .edgePath .path,
+#flowchart svg .flowchart-link  {
     stroke: var(--mermaid-line) !important;
-    stroke-width: 2px !important;
+    stroke-width: 3px !important;
+    fill: none !important;
 }
-#flowchart svg .marker {
+#flowchart svg .marker, 
+#flowchart svg marker path,
+#flowchart svg marker circle  {
     fill: var(--mermaid-line) !important;
     stroke: var(--mermaid-line) !important;
+    stroke-width: 3px !important;
 }
 
 /* Ajustement global du conteneur Mermaid */
@@ -168,6 +181,36 @@
     height: 100%;
     max-width: none; 
     display: block; /* Évite les micro-marges des éléments inline */
+}
+/* --- CORRECTIFS FORCÉS (Anti-Beige & Anti-Gris) --- */
+
+/* 1. Supprimer le fond beige des sous-graphes (Clusters) */
+#flowchart svg .cluster rect {
+    fill: transparent !important; /* Plus de beige ! */
+    stroke: var(--mermaid-line) !important;
+    stroke-width: 1px !important;
+    opacity: 0.5; /* Discret */
+}
+
+/* 2. Forcer la couleur des labels sur les flèches ('oui', 'non') */
+#flowchart svg .edgeLabel,
+#flowchart svg .edgeLabel span,
+#flowchart svg .edgeLabel div {
+    color: var(--mermaid-text) !important; /* Blanc en dark, Noir en light */
+    background-color: var(--bg-card) !important; /* Fond de la carte pour masquer le trait dessous */
+    font-family: 'Segoe UI', sans-serif !important;
+}
+
+/* 3. Forcer la couleur des pointes de flèches (Markers) */
+#flowchart svg marker, 
+#flowchart svg marker path {
+    fill: var(--mermaid-line) !important;
+    stroke: var(--mermaid-line) !important;
+}
+
+/* 4. Forcer la couleur des traits de connexion */
+#flowchart svg .edgePath .path {
+    stroke: var(--mermaid-line) !important;
 }
 
 /* Style des boutons de zoom pour qu'ils soient discrets */
@@ -490,21 +533,13 @@ body, .card, .btn, .form-control {
 /* --- UNIFICATION DES EN-TÊTES (ANTI-CIRQUE) --- */
 
 /* On écrase les classes Bootstrap (bg-info, bg-secondary, etc.) pour unifier le look */
-.card-header {
-    border-bottom: 1px solid var(--border-color) !important;
-    font-family: 'Segoe UI', sans-serif; /* Police lisible pour les titres */
-    font-weight: 600;
-}
-
-/* Thème Sombre : En-têtes gris foncé bleuté (Dracula Selection) */
-[data-bs-theme="dark"] .card-header {
-    background-color: #44475a !important; 
-    color: #ffffff !important;
-}
-
-/* Thème Clair : En-têtes gris clair neutre (Haut Contraste) */
+/* Headers unifiés (anti-cirque) : même gris dans les deux thèmes */
+.card-header,
+[data-bs-theme="dark"] .card-header,
 [data-bs-theme="light"] .card-header {
-    background-color: #e9ecef !important; /* Gris clair standard */
-    color: #212529 !important;            /* Noir presque pur */
-    border-bottom: 1px solid #ced4da !important;
+    background-color: #6c757d !important; /* gris de la toolbar CodeMirror */
+    color: #ffffff !important;
+    border-bottom: 1px solid #3b3f51 !important;
+    font-family: 'Segoe UI', sans-serif;
+    font-weight: 600;
 }

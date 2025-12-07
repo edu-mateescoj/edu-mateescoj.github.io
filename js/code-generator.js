@@ -9,8 +9,8 @@ function generateRandomPythonCode(options) {
     'get_data', 'update', 'create', 'generate', 'build',
     'initialize', 'setup', 'configure', 'prepare', 'find',
     'search', 'retrieve', 'fetch', 'display', 'show',
-    'sum', 'multiply', 'divide', 'subtract', 'compare',
-    'filter', 'sort', 'count', 'average', 'normalize'
+    'multiply', 'divide', 'subtract', 'compare',
+    'filter', 'sort', 'average', 'normalize'
     ];
 
     // --- CONSTANTES PARTAGÉES POUR LES NOMS ET TYPES ---
