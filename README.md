@@ -2,9 +2,11 @@
 
 ## MyCFG.py: 
 - implémenter le 'break' (identifier sa destination en allant voir le dernier de la stack des noeuds terminaux)
-- verbosité des boucles for string + for list
+- verbosité des boucles !!
+-> for list: La variable (liste) 'ma_liste' contient des éléments? ... Le premier élément de 'ma_liste'...
+-> for string : c'est le contraire! dnas le code "ma_chaine" mais dnas le logigramme ma_chaine
 - rappel du type de l'itérable dans la condition de boucle ?
-- rappel du type d'itérateur ??
+- rappel du type d'itérateur : pertinent ??
 
 ## Dix prompts pour migration vers MVP implémentant Role Based Access Control:
 (inspiration: Classroom)
