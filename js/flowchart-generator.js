@@ -195,6 +195,9 @@ async function displayFlowchart(mermaidCode, targetDivId) {
     
     if (!targetDiv) return;
 
+    // Mémoriser la source Mermaid pour les re-render (changement de thème, etc.)
+    targetDiv.dataset.mermaidSource = mermaidCode;
+    
     // 1. Nettoyage de l'ancienne instance
     if (panZoomInstance) {
         try {

@@ -1019,7 +1019,46 @@ function toggleTheme() {
         codeEditorInstance.setOption('theme', cmTheme);
     }
 
-    // 4. (Optionnel) Forcer le rafraîchissement Mermaid si un diagramme est affiché
+    // Re-render Mermaid sans réexécuter Python
+    refreshMermaidTheme();
+    }
+
+// nouvelle fonction utilitaire pour solutionner le problème de rafraîchissement Mermaid au changement de thème
+async function refreshMermaidTheme() {
+    const flowchartDiv = document.getElementById('flowchart');
+    if (!flowchartDiv) return;
+
+    // Récupère la définition Mermaid déjà présente
+    const mermaidSource =
+        flowchartDiv.dataset.mermaidSource ||
+        flowchartDiv.querySelector('.mermaid')?.textContent;
+    if (!mermaidSource) return;
+
+    // Nettoie et re-render
+    flowchartDiv.innerHTML = '';
+    try {
+        const { svg } = await mermaid.render('theGraph', mermaidSource);
+        flowchartDiv.innerHTML = svg;
+
+        // Réinitialise le pan-zoom si utilisé
+        if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
+            panZoomInstance.destroy();
+        }
+        const svgEl = flowchartDiv.querySelector('svg');
+        if (svgEl && typeof svgPanZoom !== 'undefined') {
+            panZoomInstance = svgPanZoom(svgEl, {
+                zoomEnabled: true,
+                controlIconsEnabled: false,
+                fit: true,
+                center: true
+            });
+        }
+    } catch (e) {
+        console.warn('Re-render Mermaid échoué:', e);
+    }
+}
+
+    /*// 4. (Optionnel) Forcer le rafraîchissement Mermaid si un diagramme est affiché
     // Mermaid ne réagit pas toujours dynamiquement aux variables CSS sans re-rendu.
     const flowchartDiv = document.getElementById('flowchart');
     if (flowchartDiv && flowchartDiv.querySelector('svg')) {
@@ -1028,8 +1067,7 @@ function toggleTheme() {
         if (runBtn && !runBtn.disabled) {
             runBtn.click(); // Solution brutale mais efficace pour redessiner avec les bonnes couleurs
         }
-    }
-}
+    }*/
 
 // --- Gestion de la Console et des I/O personnalisées ---
 /**
