@@ -114,7 +114,7 @@ for c in colors:
 # Changer la forme de la tortue
 t.shape("turtle")
 `
- ,
+    },
 {
         name: "Erreur dans le maximum",
         code: `def trouver_maximum(liste_nombres):
@@ -163,3 +163,4 @@ print(moyenne)
 
 
 ];
+
