@@ -181,6 +181,7 @@
     height: 100%;
     max-width: none; 
     display: block; /* Évite les micro-marges des éléments inline */
+    overflow: visible;
 }
 /* --- CORRECTIFS FORCÉS (Anti-Beige & Anti-Gris) --- */
 
@@ -222,6 +223,14 @@
 }
 #zoom-controls .btn:hover {
     opacity: 1;
+}
+
+#zoom-controls.show {
+    display: flex !important;
+}
+
+.col-hidden #zoom-controls {
+    display: none !important;
 }
 
 /* Transition douce lors du changement */

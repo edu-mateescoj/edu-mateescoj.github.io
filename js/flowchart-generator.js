@@ -100,7 +100,7 @@ print("Module MyCFG importé avec succès.")
 /**
  * Génère le diagramme Mermaid à partir du code Python fourni.
  * @param {string} pythonCode Le code Python à analyser.
- * @returns {Promise<Object|null>} Un objet { mermaid, canonicalCode, ast_dump } ou null.
+ * @returns {Promise<Object|null>} Un objet { mermaid, canonicalCode, ast_dump, detectedTypes } ou null.
  */
 async function generateFlowchartFromCode(pythonCode) {
     setLoadingState(true);
@@ -108,56 +108,46 @@ async function generateFlowchartFromCode(pythonCode) {
         await initPyodideAndLoadScript();
 
         if (!pythonCode || pythonCode.trim() === "") {
-            return null;
+            return {
+                mermaid: "",
+                canonicalCode: "",
+                ast_dump: "",
+                detectedTypes: {}
+            };
         }
 
         pyodide.globals.set("user_code_to_analyze", pythonCode);
 
-        // --- SCRIPT PYTHON AMÉLIORÉ ---
-        // Retourne du JSON avec Mermaid + AST Dump + Code Canonique
         const pythonScript = `
 import sys
 import ast
 import json
 import MyCFG
-# importlib.reload(MyCFG) # Décommenter en dev si besoin
 
 from MyCFG import ControlFlowGraph
 
 output = {}
 
 try:
-    code_str = user_code_to_analyze
-    
-    # 1. Analyse CFG
-    cfg = ControlFlowGraph(code_str)
-    cfg.visit(cfg.tree, None)
-    mermaid_code = cfg.to_mermaid()
-    
-    # 2. Dump AST (pour la détection de changements structurels)
-    # On utilise l'arbre déjà parsé par CFG
-    ast_dump = ast.dump(cfg.tree)
-    
-    # 3. Code Canonique (pour éviter de loguer des changements d'espaces/commentaires)
-    # On utilise ast.unparse (Python 3.9+) pour normaliser le code
-    try:
-        canonical_code = ast.unparse(cfg.tree)
-    except AttributeError:
-        # Fallback pour vieilles versions de Python (peu probable sous Pyodide récent)
-        canonical_code = code_str.strip()
+    current_code = user_code_to_analyze
+    cfg_instance = ControlFlowGraph(current_code)
+    output = cfg_instance.process_and_get_results()
 
-    output = {
-        "mermaid": mermaid_code,
-        "ast_dump": ast_dump,
-        "canonicalCode": canonical_code,
-        "status": "success"
-    }
+    if not isinstance(output, dict):
+        output = {}
+    if "detected_types" not in output:
+        output["detected_types"] = {}
+    if "ast_dump" not in output and cfg_instance.tree is not None:
+        output["ast_dump"] = ast.dump(cfg_instance.tree)
 
 except Exception as e:
+    import traceback
     output = {
-        "status": "error",
-        "message": str(e),
-        "mermaid": f"Error: {str(e)}"
+        "mermaid": f"Error: {str(e)}",
+        "canonical_code": "",
+        "ast_dump": "",
+        "detected_types": {},
+        "error": f"{type(e).__name__}: {str(e)}\\n{traceback.format_exc()}"
     }
 
 json.dumps(output)
@@ -166,12 +156,13 @@ json.dumps(output)
         const resultJson = await pyodide.runPythonAsync(pythonScript);
         const result = JSON.parse(resultJson);
 
-        if (result.status === "error") {
-            console.error("Erreur Python CFG:", result.message);
-            return { mermaid: result.mermaid, canonicalCode: "", ast_dump: "" }; // Retour partiel pour afficher l'erreur
-        }
-
-        return result;
+        return {
+            mermaid: result.mermaid || "",
+            canonicalCode: result.canonical_code || result.canonicalCode || "",
+            ast_dump: result.ast_dump || "",
+            detectedTypes: result.detected_types || {},
+            error: result.error || null
+        };
 
     } catch (err) {
         console.error("Erreur JS lors de la génération du diagramme:", err);
@@ -183,6 +174,34 @@ json.dumps(output)
 
 // Variable globale pour l'instance de zoom (pour pouvoir la détruire/réinitialiser)
 var panZoomInstance = null;
+if (typeof window.panZoomInstance === 'undefined') {
+    window.panZoomInstance = null;
+}
+
+function isFlowchartVisible() {
+    const flowchart = document.getElementById('flowchart');
+    if (!flowchart) return false;
+    return !!(flowchart.offsetParent || flowchart.getClientRects().length);
+}
+
+function bboxReady(svgElement) {
+    if (!svgElement) return false;
+    const box = svgElement.getBBox();
+    return Number.isFinite(box.width) && Number.isFinite(box.height) && box.width > 0 && box.height > 0;
+}
+
+window.__mermaidRenderInProgress = window.__mermaidRenderInProgress || false;
+window.__pendingMermaidRender = window.__pendingMermaidRender || false;
+
+window.renderPendingFlowchart = function() {
+    const container = document.getElementById('flowchart');
+    if (!container || !container.dataset || typeof container.dataset.mermaidSource !== 'string') return;
+    if (!isFlowchartVisible()) {
+        window.__pendingMermaidRender = true;
+        return;
+    }
+    displayFlowchart(container.dataset.mermaidSource, 'flowchart');
+};
 
 /**
  * Affiche le diagramme Mermaid dans le div spécifié.
@@ -195,94 +214,100 @@ async function displayFlowchart(mermaidCode, targetDivId) {
     
     if (!targetDiv) return;
 
-    // Mémoriser la source Mermaid pour les re-render (changement de thème, etc.)
-    targetDiv.dataset.mermaidSource = mermaidCode;
-    
-    // 1. Nettoyage de l'ancienne instance
-    if (panZoomInstance) {
+    targetDiv.dataset.mermaidSource = mermaidCode || "";
+
+    if (!isFlowchartVisible()) {
+        window.__pendingMermaidRender = true;
+        return;
+    }
+
+    if (window.__mermaidRenderInProgress) {
+        window.__pendingMermaidRender = true;
+        return;
+    }
+    window.__mermaidRenderInProgress = true;
+
+    if (window.panZoomInstance && typeof window.panZoomInstance.destroy === 'function') {
         try {
-            panZoomInstance.destroy();
-        } catch(e) { console.warn("Erreur destruction panZoom:", e); }
+            const svgElement = targetDiv.querySelector('svg');
+            if (svgElement && bboxReady(svgElement)) {
+                window.panZoomInstance.destroy();
+            }
+        } catch (e) {
+            console.warn(e);
+        }
+        window.panZoomInstance = null;
         panZoomInstance = null;
     }
 
     if (!mermaidCode) {
-        targetDiv.innerHTML = '<div class="alert alert-warning m-3">Impossible de générer le diagramme.</div>';
-        if (zoomControls) zoomControls.style.display = 'none';
+        targetDiv.innerHTML = '<p class="text-center text-muted mt-3">Aucun diagramme à afficher.</p>';
+        if (zoomControls) zoomControls.classList.remove('show');
+        window.__mermaidRenderInProgress = false;
         return;
     }
 
-    // 2. Préparation du conteneur
     targetDiv.innerHTML = '';
     const graphDiv = document.createElement('div');
     graphDiv.className = 'mermaid';
-    
-    // REVERSION : On utilise le code Mermaid brut sans modification JS
     graphDiv.textContent = mermaidCode;
-    
     targetDiv.appendChild(graphDiv);
 
-    // 3. Rendu Mermaid
     try {
-        await mermaid.run({
-            nodes: [graphDiv]
-        });
+        await mermaid.run({ nodes: [graphDiv] });
 
-        // 4. Initialisation SVG-PAN-ZOOM (Renforcée)
         const svgElement = targetDiv.querySelector('svg');
-        
-        if (svgElement) {
-            // A. Assurer un ID unique (Requis par la lib parfois)
-            if (!svgElement.id) {
-                svgElement.id = "mermaid-svg-" + Date.now();
-            }
 
-            // B. Nettoyer les attributs de taille fixes de Mermaid
+        if (svgElement) {
             svgElement.removeAttribute('height');
             svgElement.removeAttribute('width');
-            svgElement.removeAttribute('style'); 
-            
-            // C. Forcer le style CSS pour remplir le conteneur
-            svgElement.style.width = "100%";
-            svgElement.style.height = "100%";
-            svgElement.style.maxWidth = "none"; 
-            svgElement.style.display = "block";
+            svgElement.removeAttribute('style');
+            svgElement.style.width = '100%';
+            svgElement.style.height = '100%';
+            svgElement.style.maxWidth = 'none';
+            svgElement.style.display = 'block';
 
-            // D. Initialisation avec un léger délai
-            setTimeout(() => {
+            const tryInitPanZoom = () => {
+                if (!svgElement.getClientRects().length || !bboxReady(svgElement)) return false;
+                if (typeof svgPanZoom === 'undefined') return false;
+
+                window.panZoomInstance = svgPanZoom(svgElement, {
+                    zoomEnabled: true,
+                    controlIconsEnabled: false,
+                    fit: true,
+                    center: true,
+                    minZoom: 0.1,
+                    maxZoom: 10,
+                    dblClickZoomEnabled: false
+                });
+                panZoomInstance = window.panZoomInstance;
+
                 try {
-                    if (typeof svgPanZoom === 'undefined') return;
-
-                    panZoomInstance = svgPanZoom('#' + svgElement.id, {
-                        zoomEnabled: true,
-                        controlIconsEnabled: false,
-                        fit: false, // On interdit l'ajustement automatique
-                        center: true, // On centre l'image
-                        minZoom: 0.1,
-                        maxZoom: 10,
-                        dblClickZoomEnabled: false
-                    });
-                    
-                    // --- CORRECTION DU ZOOM ---
-                    // Au lieu de laisser la librairie deviner, on force un zoom à 100% (échelle 1)
-                    // Cela garantit que le texte est lisible, même si le diagramme dépasse du cadre.
-                    panZoomInstance.zoom(1.0);
-                    panZoomInstance.center(); // On recentre après le zoom
-                    
-                    if (zoomControls) zoomControls.style.display = 'flex';
-
-                } catch (err) {
-                    console.error("Erreur zoom:", err);
+                    window.panZoomInstance.resize();
+                    window.panZoomInstance.fit();
+                    window.panZoomInstance.center();
+                } catch (e) {
+                    console.warn(e);
                 }
-            }, 200); // Délai légèrement augmenté (200ms) pour être sûr que le rendu est fini
-        } else {
-            console.error("Aucun élément SVG trouvé après le rendu Mermaid.");
-        }
 
+                if (zoomControls) zoomControls.classList.add('show');
+                return true;
+            };
+
+            if (!tryInitPanZoom()) {
+                setTimeout(tryInitPanZoom, 120);
+            }
+        }
     } catch (err) {
         console.error("Erreur de rendu Mermaid:", err);
         targetDiv.innerHTML = `<div class="alert alert-danger m-3">Erreur d'affichage graphique: ${err.message}</div>`;
-        if (zoomControls) zoomControls.style.display = 'none';
+        if (zoomControls) zoomControls.classList.remove('show');
+    } finally {
+        window.__mermaidRenderInProgress = false;
+        if (window.__pendingMermaidRender && isFlowchartVisible()) {
+            window.__pendingMermaidRender = false;
+            window.renderPendingFlowchart();
+        }
     }
 }
 
@@ -327,32 +352,25 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-    // Initialiser Mermaid (configuration globale si nécessaire)
-    mermaid.initialize({
-        startOnLoad: false, // Nous allons appeler mermaid.run() manuellement
-        // Utiliser 'base' pour laisser le CSS contrôler les couleurs
-        theme: 'base',
-        themeVariables: {
-            primaryColor: '#ffffff',
-            lineColor: '#ffffff',
-            mainBkg: 'transparent',
-            nodeBorder: '#ffffff'
-        },
-        securityLevel: 'loose',
-        flowchart: {
-            useMaxWidth: false,
-            htmlLabels: true,     // Indispensable pour le CSS ci-dessous
-            
-            // 1. COMPACITÉ
-            curve: 'basis',      // Essaie 'linear' ou 'stepAfter' pour gagner de la place. 'basis' est le plus large.
-            nodeSpacing: 15,      // Réduit l'espace horizontal entre les noeuds (Défaut 50)
-            rankSpacing: 15,      // Réduit l'espace vertical entre les niveaux (Défaut 50)
-            padding: 5,          // Espace interne texte/bordure
-            
-            // 2. OPTIMISATION DU RENDU
-            defaultRenderer: 'dagre-d3' // Le moteur par défaut est robuste
+    const initMermaid = () => {
+        if (typeof window.mermaid === 'undefined') {
+            console.warn("Mermaid n'est pas encore chargé. Nouvelle tentative dans 300ms...");
+            setTimeout(initMermaid, 300);
+            return;
         }
-    });
+
+        window.mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            securityLevel: 'loose',
+            flowchart: {
+                useMaxWidth: false,
+                htmlLabels: true
+            }
+        });
+    };
+
+    initMermaid();
 });
 
 // Fonction globale pour être appelée depuis d'autres scripts
@@ -391,3 +409,19 @@ async function triggerFlowchartUpdate() {
         return null; // Retourner null si pas de code
     }
 }
+
+window.rerenderStoredFlowchart = function() {
+    const container = document.getElementById('flowchart');
+    if (!container || !container.dataset || typeof container.dataset.mermaidSource !== 'string') return;
+    if (!isFlowchartVisible()) {
+        window.__pendingMermaidRender = true;
+        return;
+    }
+    displayFlowchart(container.dataset.mermaidSource, 'flowchart');
+};
+
+document.addEventListener('theme:changed', function() {
+    if (typeof window.rerenderStoredFlowchart === 'function') {
+        window.rerenderStoredFlowchart();
+    }
+});

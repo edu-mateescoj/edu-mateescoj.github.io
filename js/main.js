@@ -64,6 +64,7 @@ let variableValuesFromExecution = {}; // Pour stocker les valeurs des variables 
 let lastDiagramAstDump = ""; // Pour la synchronisation diagramme/code
 let lastLoggedCanonicalCode = ""; // Stocke le dernier code normalisé qui a été journalisé
 let currentChallengeCodeId = null; // Pour stocker l'ID du code de défi actuel
+let currentChallengeVariableTypes = {}; // Types détectés pour le défi courant
 
 // --- Variables DOM globales (déclarées ici pour être accessibles partout) ---
 let difficultyGlobalSelect;
@@ -991,72 +992,91 @@ function reprPythonVal(value) {
     return String(value);
 }
 
-/**
- * Bascule entre le thème clair et sombre.
- * Gère Bootstrap, CodeMirror et l'icône du bouton.
- */
-function toggleTheme() {
-    const html = document.documentElement;
-    const currentTheme = html.getAttribute('data-bs-theme');
-    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-    
-    // 1. Appliquer au document (Bootstrap gère le reste via CSS variables)
-    html.setAttribute('data-bs-theme', newTheme);
-    localStorage.setItem('theme', newTheme);
-    
-    // 2. Mettre à jour l'icône du bouton
+function applyTheme(theme) {
+    const normalizedTheme = (theme === 'light' || theme === 'dark') ? theme : 'dark';
+    document.documentElement.setAttribute('data-bs-theme', normalizedTheme);
+    localStorage.setItem('theme', normalizedTheme);
+
+    if (codeEditorInstance) {
+        codeEditorInstance.setOption('theme', normalizedTheme === 'light' ? 'solarized light' : 'dracula');
+    }
+
     const icon = document.getElementById('theme-icon');
     if (icon) {
-        // Note: Assurez-vous d'avoir <i id="theme-icon" class="..."></i> dans votre HTML
-        icon.className = newTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+        icon.className = normalizedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
     }
 
-    // 3. Mettre à jour CodeMirror (Éditeur Python)
-    if (codeEditorInstance) {
-        // Si newTheme est 'light', on utilise 'solarized light' (fond clair)
-        // Si newTheme est 'dark', on utilise 'dracula' (fond sombre)
-        const cmTheme = newTheme === 'light' ? 'solarized light' : 'dracula'; 
-        codeEditorInstance.setOption('theme', cmTheme);
-    }
-
-    // Re-render Mermaid sans réexécuter Python
-    refreshMermaidTheme();
-    }
-
-// nouvelle fonction utilitaire pour solutionner le problème de rafraîchissement Mermaid au changement de thème
-async function refreshMermaidTheme() {
-    const flowchartDiv = document.getElementById('flowchart');
-    if (!flowchartDiv) return;
-
-    // Récupère la définition Mermaid déjà présente
-    const mermaidSource =
-        flowchartDiv.dataset.mermaidSource ||
-        flowchartDiv.querySelector('.mermaid')?.textContent;
-    if (!mermaidSource) return;
-
-    // Nettoie et re-render
-    flowchartDiv.innerHTML = '';
-    try {
-        const { svg } = await mermaid.render('theGraph', mermaidSource);
-        flowchartDiv.innerHTML = svg;
-
-        // Réinitialise le pan-zoom si utilisé
-        if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
-            panZoomInstance.destroy();
-        }
-        const svgEl = flowchartDiv.querySelector('svg');
-        if (svgEl && typeof svgPanZoom !== 'undefined') {
-            panZoomInstance = svgPanZoom(svgEl, {
-                zoomEnabled: true,
-                controlIconsEnabled: false,
-                fit: true,
-                center: true
-            });
-        }
-    } catch (e) {
-        console.warn('Re-render Mermaid échoué:', e);
+    document.dispatchEvent(new CustomEvent('theme:changed', { detail: { theme: normalizedTheme } }));
+    if (typeof window.rerenderStoredFlowchart === 'function') {
+        window.rerenderStoredFlowchart();
     }
 }
+
+function getInitialTheme() {
+    const storedTheme = localStorage.getItem('theme');
+    if (storedTheme === 'light' || storedTheme === 'dark') return storedTheme;
+
+    const htmlTheme = document.documentElement.getAttribute('data-bs-theme');
+    if (htmlTheme === 'light' || htmlTheme === 'dark') return htmlTheme;
+
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    return 'light';
+}
+
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-bs-theme') || 'dark';
+    applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+}
+
+function isFlowchartVisible() {
+    const flowchart = document.getElementById('flowchart');
+    if (!flowchart) return false;
+    return !!(flowchart.offsetParent || flowchart.getClientRects().length);
+}
+
+function refreshPanZoom() {
+    const instance = window.panZoomInstance;
+    if (!instance || !isFlowchartVisible()) return;
+
+    const svgElement = document.querySelector('#flowchart svg');
+    if (!svgElement || !svgElement.getClientRects().length) return;
+
+    const box = svgElement.getBBox();
+    if (!box || box.width <= 0 || box.height <= 0) return;
+
+    try {
+        instance.resize();
+        instance.fit();
+        instance.center();
+    } catch (e) {
+        console.warn('PanZoom refresh skipped:', e);
+    }
+}
+
+function safePanZoomOp(operation) {
+    const instance = window.panZoomInstance;
+    if (!instance || !isFlowchartVisible()) return;
+
+    const svgElement = document.querySelector('#flowchart svg');
+    if (!svgElement || !svgElement.getClientRects().length) return;
+
+    const box = svgElement.getBBox();
+    if (!box || box.width <= 0 || box.height <= 0) return;
+
+    try {
+        operation(instance);
+    } catch (e) {
+        console.warn('PanZoom op skipped:', e);
+    }
+}
+
+window.zoomIn = () => safePanZoomOp(instance => instance.zoomIn());
+window.zoomOut = () => safePanZoomOp(instance => instance.zoomOut());
+window.resetZoom = () => safePanZoomOp(instance => {
+    if (typeof instance.reset === 'function') instance.reset();
+    instance.fit();
+    instance.center();
+});
 
     /*// 4. (Optionnel) Forcer le rafraîchissement Mermaid si un diagramme est affiché
     // Mermaid ne réagit pas toujours dynamiquement aux variables CSS sans re-rendu.
@@ -1410,39 +1430,12 @@ function exportFlowchartAsSvg() {
 
 // --- Gestion des événements pour les boutons et éléments de l'interface ---
 document.addEventListener('DOMContentLoaded', function() {
-    // --- Gestion du Thème (Dark/Light) ---
-    const themeToggleBtn = document.getElementById('theme-toggle');
-    
-    // Appliquer le thème sauvegardé au chargement
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    document.documentElement.setAttribute('data-bs-theme', savedTheme);
-    
-    // Ajuster l'éditeur CodeMirror au démarrage si on est en mode clair
-    // A SUPPRIMER: NE SERT À RIEN (car l'instance n'existe pas encore)
-    /*
-    if (savedTheme === 'light' && codeEditorInstance) {
-        codeEditorInstance.setOption('theme', 'default');
-    }
-    */
-    
-    // Ajuster l'icône au démarrage
-    const themeIcon = document.getElementById('theme-icon');
-    if (themeIcon) {
-        themeIcon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
-    }
-
-    if (themeToggleBtn) {
-        themeToggleBtn.addEventListener('click', toggleTheme);
-    }
-
-    // --- Initialisation de l'éditeur CodeMirror ---
-
-    // Définir le thème AVANT l'initialisation
+    const savedTheme = getInitialTheme();
     const initialCmTheme = savedTheme === 'light' ? 'solarized light' : 'dracula';
 
     codeEditorInstance = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
         mode: 'python',
-        theme: initialCmTheme, // <--- Utiliser la variable ici au lieu de 'dracula' en dur
+        theme: initialCmTheme,
         lineNumbers: true,
         firstLineNumber: 0,
         indentUnit: 4,
@@ -1452,6 +1445,13 @@ document.addEventListener('DOMContentLoaded', function() {
         readOnly: !isEditorEditable // Initialement non éditable
 
     });
+
+    applyTheme(savedTheme);
+
+    const themeToggleBtn = document.getElementById('theme-toggle');
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
+    }
 
     // --- Initialisation des variables DOM globales ---
     difficultyGlobalSelect = document.getElementById('difficulty-level-global');
@@ -1835,8 +1835,13 @@ document.addEventListener('DOMContentLoaded', function() {
             try {
                 if (typeof triggerFlowchartUpdate === 'function') {
                     // On s'attend à ce que triggerFlowchartUpdate retourne un objet :
-                    // { mermaid: "...", canonicalCode: "...", ast_dump: "..." }
+                    // { mermaid: "...", canonicalCode: "...", ast_dump: "...", detectedTypes: {} }
                     processingResults = await triggerFlowchartUpdate();
+                    currentChallengeVariableTypes = (
+                        processingResults &&
+                        processingResults.detectedTypes &&
+                        typeof processingResults.detectedTypes === 'object'
+                    ) ? processingResults.detectedTypes : {};
                 } else {
                     throw new Error("La fonction triggerFlowchartUpdate n'est pas définie.");
                 }
@@ -2103,55 +2108,44 @@ function initResizer() {
     const rightSide = document.getElementById('col-diagram');
     const container = document.getElementById('workspace-container');
 
-    if (!resizer || !leftSide || !rightSide) return;
+    if (!resizer || !leftSide || !rightSide || !container) return;
 
     let x = 0;
     let leftWidth = 0;
 
-    // Gestionnaire souris enfoncée
     const mouseDownHandler = function(e) {
-        // On ajoute une classe pour figer les largeurs
+        if (window.innerWidth < 992) return;
+
         container.classList.add('split-active');
         resizer.classList.add('active');
-        
+
         x = e.clientX;
         leftWidth = leftSide.getBoundingClientRect().width;
 
-        // On attache les événements au document pour ne pas perdre le focus si la souris sort
         document.addEventListener('mousemove', mouseMoveHandler);
         document.addEventListener('mouseup', mouseUpHandler);
-        
-        // UX : Empêcher la sélection de texte et forcer le curseur
+
         document.body.style.userSelect = 'none';
         document.body.style.cursor = 'col-resize';
-        
-        // Masquer l'iframe de CodeMirror ou les éléments qui capturent la souris (optionnel)
         leftSide.style.pointerEvents = 'none';
         rightSide.style.pointerEvents = 'none';
     };
 
-    // Gestionnaire mouvement souris
     const mouseMoveHandler = function(e) {
         const dx = e.clientX - x;
-        const newLeftWidth = leftWidth + dx;
         const containerWidth = container.getBoundingClientRect().width;
-        
-        // Calcul en pourcentage pour le responsive
-        const newLeftPercent = (newLeftWidth / containerWidth) * 100;
-        const newRightPercent = 100 - newLeftPercent;
+        const resizerWidth = resizer.getBoundingClientRect().width || 6;
+        const minPx = Math.max(240, containerWidth * 0.2);
+        const maxPx = containerWidth - minPx - resizerWidth;
 
-        // Limites de sécurité (min 15%, max 85%)
-        if (newLeftPercent > 15 && newLeftPercent < 85) {
-            // On soustrait la largeur du resizer (environ 1%) du côté droit
-            leftSide.style.width = `${newLeftPercent}%`;
-            rightSide.style.width = `calc(${newRightPercent}% - 10px)`; 
-        }
-        
-        // Note : On ne refresh pas CodeMirror/Mermaid à chaque pixel pour la perf,
-        // on le fera au mouseUp.
+        let newLeftPx = leftWidth + dx;
+        newLeftPx = Math.max(minPx, Math.min(maxPx, newLeftPx));
+        const newRightPx = containerWidth - newLeftPx - resizerWidth;
+
+        leftSide.style.flex = `0 0 ${newLeftPx}px`;
+        rightSide.style.flex = `0 0 ${newRightPx}px`;
     };
 
-    // Gestionnaire souris relâchée
     const mouseUpHandler = function() {
         resizer.classList.remove('active');
         document.body.style.removeProperty('user-select');
@@ -2162,13 +2156,8 @@ function initResizer() {
         document.removeEventListener('mousemove', mouseMoveHandler);
         document.removeEventListener('mouseup', mouseUpHandler);
         
-        // Rafraîchissement final des composants graphiques
         if (codeEditorInstance) codeEditorInstance.refresh();
-        if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
-            panZoomInstance.resize();
-            panZoomInstance.fit();
-            panZoomInstance.center();
-        }
+        refreshPanZoom();
     };
 
     resizer.addEventListener('mousedown', mouseDownHandler);
@@ -2180,42 +2169,45 @@ function switchView(mode) {
     const colDiagram = document.getElementById('col-diagram');
     const resizer = document.getElementById('resizer');
     const container = document.getElementById('workspace-container');
+    const zoomControls = document.getElementById('zoom-controls');
 
-    // Réinitialisation propre
+    const resetCol = (element) => {
+        element.style.width = '';
+        element.style.flex = '';
+        element.style.maxWidth = '';
+        element.classList.remove('col-full', 'col-hidden');
+    };
+
     container.classList.remove('split-active');
-    colEditor.style.width = '';
-    colDiagram.style.width = '';
-    colEditor.classList.remove('col-full', 'col-hidden');
-    colDiagram.classList.remove('col-full', 'col-hidden');
-    
-    // Gestion de l'affichage du resizer (visible seulement en split desktop)
-    resizer.classList.remove('d-none'); 
+    resetCol(colEditor);
+    resetCol(colDiagram);
+
+    resizer.classList.remove('d-none');
     resizer.classList.add('d-lg-block');
 
     if (mode === 'code') {
         colEditor.classList.add('col-full');
         colDiagram.classList.add('col-hidden');
-        resizer.classList.add('d-none'); // Cacher resizer
+        resizer.classList.add('d-none');
         resizer.classList.remove('d-lg-block');
     } else if (mode === 'chart') {
         colEditor.classList.add('col-hidden');
         colDiagram.classList.add('col-full');
-        resizer.classList.add('d-none'); // Cacher resizer
+        resizer.classList.add('d-none');
         resizer.classList.remove('d-lg-block');
-    } else {
-        // Mode Split (Défaut)
-        // On laisse Bootstrap gérer ou le resizer si utilisé
     }
 
-    // Rafraîchissement après transition (petit délai pour laisser le DOM s'ajuster)
+    if (mode === 'code' && zoomControls) {
+        zoomControls.classList.remove('show');
+    }
+
     setTimeout(() => {
         if (codeEditorInstance) codeEditorInstance.refresh();
-        if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
-            panZoomInstance.resize();
-            panZoomInstance.fit();
-            panZoomInstance.center();
+        refreshPanZoom();
+        if (typeof window.renderPendingFlowchart === 'function') {
+            window.renderPendingFlowchart();
         }
-    }, 50);
+    }, 80);
 }
 
 // pour le rendre explicitement global (optionnel)
@@ -2236,9 +2228,7 @@ window.toggleFullScreen = function() {
 };
 
 document.addEventListener('fullscreenchange', () => {
-    if (typeof panZoomInstance !== 'undefined' && panZoomInstance) {
-        setTimeout(() => { panZoomInstance.resize(); panZoomInstance.fit(); panZoomInstance.center(); }, 100);
-    }
+    setTimeout(refreshPanZoom, 100);
 });
 
 // --- 4. RESIZER HORIZONTAL (Hauteur synchronisée des cartes) ---

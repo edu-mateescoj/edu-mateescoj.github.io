@@ -528,39 +528,75 @@ function generateRandomPythonCode(options) {
 
         return { condition, intVar };
     }
+
+    // Génère une boucle for imbriquée de profondeur 2 ou 3
+    function generateNestedForLoop(depth) {
+        const makeRangeSpec = () => {
+            if (options.loop_range_abs) {
+                const start = getRandomInt(0, 3);
+                const stop = start + getRandomInt(3, 8);
+                const step = getRandomInt(1, 3);
+                return `${start}, ${stop}, ${step}`;
+            } else if (options.loop_range_ab) {
+                const start = getRandomInt(0, 3);
+                const stop = start + getRandomInt(3, 8);
+                return `${start}, ${stop}`;
+            }
+            return `${getRandomInt(difficulty + 1, difficulty + 4)}`;
+        };
+
+        const loopVars = [];
+        for (let depthIndex = 0; depthIndex < depth; depthIndex++) {
+            const loopVar = generateUniqueIteratorName('int');
+            loopVars.push(loopVar);
+            codeLines.push(`${safeIndent(indentLevel)}for ${loopVar} in range(${makeRangeSpec()}):`);
+            indentLevel++;
+        }
+
+        const bodyLines = generateStructureBody(indentLevel, 'for_range', {
+            loopVar: loopVars[loopVars.length - 1],
+            difficulty
+        });
+        bodyLines.forEach(line => codeLines.push(line));
+
+        indentLevel -= depth;
+        linesGenerated += depth + bodyLines.length;
+    }
     
     function generateControlStructures() {
    
         // Créer un tableau des structures possibles
         const structures = [];
 
-        // Conditions - sans vérification de lignes restantes
-        if (options.main_conditions && options.cond_if) {
-        structures.push('if');
-    }
-    // Ne plus vérifier si des variables list OU str existent
-    // && declaredVarsByType.list.length > 0
-    if (options.main_loops) {
-        if (options.loop_for_range) structures.push('for_range');
-        if (options.loop_for_list) structures.push('for_list');
-        if (options.loop_for_str) structures.push('for_str');
-        if (options.loop_while) structures.push('while');
-    }
-    if (options.main_functions && (options.func_def_simple || options.func_def_a || options.func_def_ab)) {
-        structures.push('function');
-    }
-    // Mélanger pour un ordre aléatoire
-    shuffleArray(structures);
+        if (options.main_conditions && options.cond_if) structures.push('if');
 
-    // Générer les structures dans l'ordre mélangé
-    for (const structure of structures) {
-        switch (structure) {
-            case 'if': generateIfStatement(); break;
-            case 'for_range': generateForRangeLoop(); break;
-            case 'for_list': generateForListLoop(); break;
-            case 'for_str': generateForStrLoop(); break;
-            case 'while': generateWhileLoop(); break;
-            case 'function': generateFunction(); break;
+        if (options.main_loops) {
+            if (options.loop_for_range || options.loop_range_ab || options.loop_range_abs) {
+                structures.push('for_range');
+            }
+            if (options.loop_nested_for2) structures.push('for_nested2');
+            if (options.loop_nested_for3) structures.push('for_nested3');
+            if (options.loop_for_list) structures.push('for_list');
+            if (options.loop_for_str) structures.push('for_str');
+            if (options.loop_while) structures.push('while');
+        }
+
+        if (options.main_functions && (options.func_def_simple || options.func_def_a || options.func_def_ab)) {
+            structures.push('function');
+        }
+
+        shuffleArray(structures);
+
+        for (const structure of structures) {
+            switch (structure) {
+                case 'if': generateIfStatement(); break;
+                case 'for_range': generateForRangeLoop(); break;
+                case 'for_nested2': generateNestedForLoop(2); break;
+                case 'for_nested3': generateNestedForLoop(3); break;
+                case 'for_list': generateForListLoop(); break;
+                case 'for_str': generateForStrLoop(); break;
+                case 'while': generateWhileLoop(); break;
+                case 'function': generateFunction(); break;
             }
         }
     }
@@ -1012,13 +1048,23 @@ function generateRandomPythonCode(options) {
     //  CORPS := "VAR = VAR + ITERATEUR" UNIQUEMENT
     function generateForRangeLoop() {
         const indent = safeIndent(indentLevel);
-        
-        // La variable d'itération est considérée comme "déclarée" dans le contexte de la boucle
-        const loopVar = generateUniqueIteratorName('int');
 
-        const rangeLimit = getRandomInt(difficulty + 1, difficulty + 4); // Plage de 1 à 10
-        
-        codeLines.push(`${indent}for ${loopVar} in range(${rangeLimit}):`);
+        let rangeSpec;
+        if (options.loop_range_abs) {
+            const start = getRandomInt(0, 3);
+            const stop = start + getRandomInt(3, 8);
+            const step = getRandomInt(1, 3);
+            rangeSpec = `${start}, ${stop}, ${step}`;
+        } else if (options.loop_range_ab) {
+            const start = getRandomInt(0, 3);
+            const stop = start + getRandomInt(3, 8);
+            rangeSpec = `${start}, ${stop}`;
+        } else {
+            rangeSpec = `${getRandomInt(difficulty + 1, difficulty + 4)}`;
+        }
+
+        const loopVar = generateUniqueIteratorName('int');
+        codeLines.push(`${indent}for ${loopVar} in range(${rangeSpec}):`);
         indentLevel++;
         
         // Utiliser generateStructureBody comme pour les autres types de boucles
@@ -1345,17 +1391,25 @@ function generateRandomPythonCode(options) {
         
         // Boucles - chaque boucle a besoin d'au moins une variable d'itération
         if (options.main_loops) {
-            if (options.loop_for_range) {
+            if (options.loop_for_range || options.loop_range_ab || options.loop_range_abs) {
                 requiredLines += 2;
                 requiredVars += 1; // Variable d'itération pour for in range
             }
+            if (options.loop_nested_for2) {
+                requiredLines += 3;
+                requiredVars += 2;
+            }
+            if (options.loop_nested_for3) {
+                requiredLines += 4;
+                requiredVars += 3;
+            }
             if (options.loop_for_list) {
                 requiredLines += 2;
-                requiredVars += 1; // Variable d'itération + besoin d'une liste
+                requiredVars += (declaredVarsByType.list.length === 0 ? 2 : 1);
             }
             if (options.loop_for_str) {
                 requiredLines += 2;
-                requiredVars += 1; // Variable d'itération + besoin d'une chaîne
+                requiredVars += (declaredVarsByType.str.length === 0 ? 2 : 1);
             }
             if (options.loop_while) {
                 requiredLines += 3; // +1 pour init compteur

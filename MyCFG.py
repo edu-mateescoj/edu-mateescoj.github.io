@@ -1,5 +1,5 @@
 import ast
-from typing import List, Dict, Set, Tuple, Optional
+from typing import List, Dict, Set, Tuple, Optional, Any
 
 class ControlFlowGraph:
     def __init__(self, code: str):
@@ -43,19 +43,150 @@ class ControlFlowGraph:
             return {
                 "mermaid": "graph TD\n    error[Code syntaxiquement invalide]",
                 "canonical_code": f"# Erreur de syntaxe:\n# {getattr(self, 'syntax_error', 'Erreur inconnue')}",
-                "error": str(getattr(self, 'syntax_error', 'Erreur inconnue'))
+                "error": str(getattr(self, 'syntax_error', 'Erreur inconnue')),
+                "detected_types": {}
             }
 
         self.visit(self.tree, None)
         mermaid_string = self.to_mermaid()
         canonical_code_string = ast.unparse(self.tree)
+        detected_types = self.get_variable_types()
 
         return {
             "mermaid": mermaid_string,
             "canonical_code": canonical_code_string,
             "ast_dump": ast.dump(self.tree),
+            "detected_types": detected_types,
             "error": None
         }
+
+    def _normalize_assignment_entry_type(self, assigned_ast_type: type, assigned_value_or_desc: Any) -> str:
+        """
+        Convertit une entrée de self.variable_assignments vers un type simple.
+        """
+        allowed = {"int", "float", "str", "bool", "list", "unknown"}
+
+        if isinstance(assigned_value_or_desc, str) and assigned_value_or_desc in allowed:
+            return assigned_value_or_desc
+
+        if assigned_ast_type == ast.Constant:
+            value = assigned_value_or_desc
+            if isinstance(value, bool):
+                return "bool"
+            if isinstance(value, int):
+                return "int"
+            if isinstance(value, float):
+                return "float"
+            if isinstance(value, str):
+                return "str"
+            return "unknown"
+
+        if assigned_ast_type == ast.List:
+            return "list"
+
+        if assigned_ast_type in (ast.Tuple, ast.Set, ast.Dict):
+            return "unknown"
+
+        if assigned_ast_type == ast.Call and isinstance(assigned_value_or_desc, str):
+            low = assigned_value_or_desc.lower()
+            if "chaîne" in low or "string" in low:
+                return "str"
+            if "entier" in low:
+                return "int"
+            if "bool" in low:
+                return "bool"
+            if "list" in low or "liste" in low:
+                return "list"
+            if "nombre" in low:
+                return "unknown"
+
+        return "unknown"
+
+    def _infer_type_from_value_node(self, value_node: ast.AST) -> str:
+        """
+        Infère le type simple d'une expression d'assignation.
+        """
+        if isinstance(value_node, ast.Constant):
+            value = value_node.value
+            if isinstance(value, bool):
+                return "bool"
+            if isinstance(value, int):
+                return "int"
+            if isinstance(value, float):
+                return "float"
+            if isinstance(value, str):
+                return "str"
+            return "unknown"
+
+        if isinstance(value_node, ast.List):
+            return "list"
+
+        if isinstance(value_node, ast.Name):
+            if value_node.id in self.variable_assignments:
+                assigned_ast_type, assigned_value_or_desc = self.variable_assignments[value_node.id]
+                return self._normalize_assignment_entry_type(assigned_ast_type, assigned_value_or_desc)
+            return "unknown"
+
+        if isinstance(value_node, ast.Call) and isinstance(value_node.func, ast.Name):
+            builtin_map = {
+                "int": "int",
+                "float": "float",
+                "str": "str",
+                "bool": "bool",
+                "list": "list",
+                "len": "int",
+                "input": "str",
+                "ord": "int",
+                "chr": "str",
+            }
+            return builtin_map.get(value_node.func.id, "unknown")
+
+        if isinstance(value_node, ast.Compare):
+            return "bool"
+
+        if isinstance(value_node, ast.BoolOp):
+            return "bool"
+
+        if isinstance(value_node, ast.UnaryOp):
+            if isinstance(value_node.op, ast.Not):
+                return "bool"
+            operand_type = self._infer_type_from_value_node(value_node.operand)
+            if isinstance(value_node.op, (ast.UAdd, ast.USub)) and operand_type in ("int", "float"):
+                return operand_type
+            return "unknown"
+
+        if isinstance(value_node, ast.BinOp):
+            left_type = self._infer_type_from_value_node(value_node.left)
+            right_type = self._infer_type_from_value_node(value_node.right)
+
+            if left_type in ("int", "float") and right_type in ("int", "float"):
+                if "float" in (left_type, right_type):
+                    return "float"
+                return "int"
+
+            if left_type == "str" and right_type == "str" and isinstance(value_node.op, ast.Add):
+                return "str"
+
+            if left_type == "list" and right_type == "list" and isinstance(value_node.op, ast.Add):
+                return "list"
+
+            return "unknown"
+
+        if isinstance(value_node, ast.IfExp):
+            body_type = self._infer_type_from_value_node(value_node.body)
+            else_type = self._infer_type_from_value_node(value_node.orelse)
+            return body_type if body_type == else_type else "unknown"
+
+        return "unknown"
+
+    def get_variable_types(self) -> Dict[str, str]:
+        """
+        Retourne un dictionnaire simple: variable -> type.
+        """
+        detected: Dict[str, str] = {}
+        for var_name, (assigned_ast_type, assigned_value_or_desc) in self.variable_assignments.items():
+            detected[var_name] = self._normalize_assignment_entry_type(assigned_ast_type, assigned_value_or_desc)
+        return detected
         
     def get_node_id(self) -> str:
         """Génère un nouvel ID de nœud unique et l'ajoute à la portée de fonction actuelle si applicable."""
