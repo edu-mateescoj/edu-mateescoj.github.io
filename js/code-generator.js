@@ -562,13 +562,45 @@ function generateRandomPythonCode(options) {
         indentLevel -= depth;
         linesGenerated += depth + bodyLines.length;
     }
+
+    function getConditionStructuresToGenerate() {
+        if (!options.main_conditions) {
+            return [];
+        }
+
+        const structures = [];
+
+        if (options.cond_if) {
+            structures.push('if');
+        }
+        if (options.cond_if_if) {
+            structures.push('if_nested2');
+        }
+        if (options.cond_if_if_if) {
+            structures.push('if_nested3');
+        }
+
+        return structures;
+    }
+
+    function generateDistinctCondition(usedConditions = new Set()) {
+        let condition = null;
+        let attempts = 0;
+
+        do {
+            condition = generateCondition(['bool', 'int', 'list', 'str'], true).condition;
+            attempts++;
+        } while (condition && usedConditions.has(condition) && attempts < 5);
+
+        return condition;
+    }
     
     function generateControlStructures() {
    
         // Créer un tableau des structures possibles
         const structures = [];
 
-        if (options.main_conditions && options.cond_if) structures.push('if');
+        structures.push(...getConditionStructuresToGenerate());
 
         if (options.main_loops) {
             if (options.loop_for_range || options.loop_range_ab || options.loop_range_abs) {
@@ -590,6 +622,8 @@ function generateRandomPythonCode(options) {
         for (const structure of structures) {
             switch (structure) {
                 case 'if': generateIfStatement(); break;
+                case 'if_nested2': generateNestedIfStatement(2); break;
+                case 'if_nested3': generateNestedIfStatement(3); break;
                 case 'for_range': generateForRangeLoop(); break;
                 case 'for_nested2': generateNestedForLoop(2); break;
                 case 'for_nested3': generateNestedForLoop(3); break;
@@ -979,17 +1013,20 @@ function generateRandomPythonCode(options) {
     // Génération d'un if (avec else optionnel)
     function generateIfStatement() {
         const indent = safeIndent(indentLevel);
+        const usedConditions = new Set();
         
         // --- REFACTORISATION ---
         // On utilise maintenant generateCondition pour le IF principal,
         // ce qui permet d'utiliser des listes et des chaînes, et non plus seulement des booléens/entiers.
         // Le 'true' indique de préférer une variable existante.
-        const { condition } = generateCondition(['bool', 'int', 'list', 'str'], true);
+        const condition = generateDistinctCondition(usedConditions);
 
         // Si aucune condition n'a pu être générée (cas très rare), on abandonne.
         if (!condition) {
             return;
         }
+
+        usedConditions.add(condition);
 
         // Générer la ligne if avec la condition
         codeLines.push(`${indent}if ${condition}:`);
@@ -1006,14 +1043,10 @@ function generateRandomPythonCode(options) {
 
         // 1. Gérer le 'elif'
         if (options.cond_if_elif) {
-            let elifCondition;
-            let attempts = 0;
-            do {
-                elifCondition = generateCondition(['bool', 'int', 'list', 'str'], true).condition;
-                attempts++;
-            } while (elifCondition === condition && attempts < 5);
+            const elifCondition = generateDistinctCondition(usedConditions);
 
             if (elifCondition) {
+                usedConditions.add(elifCondition);
                 codeLines.push(`${indent}elif ${elifCondition}:`);
                 indentLevel++;
                 
@@ -1041,6 +1074,31 @@ function generateRandomPythonCode(options) {
             linesAdded += 2;
         }
         
+        linesGenerated += linesAdded;
+    }
+
+    function generateNestedIfStatement(depth) {
+        const usedConditions = new Set();
+        const initialIndentLevel = indentLevel;
+        let linesAdded = 0;
+
+        for (let level = 0; level < depth; level++) {
+            const condition = generateDistinctCondition(usedConditions);
+
+            if (!condition) {
+                indentLevel = initialIndentLevel;
+                return;
+            }
+
+            usedConditions.add(condition);
+            codeLines.push(`${safeIndent(indentLevel)}if ${condition}:`);
+            indentLevel++;
+            linesAdded++;
+        }
+
+        codeLines.push(`${safeIndent(indentLevel)}${generateAppropriateStatement()}`);
+        indentLevel = initialIndentLevel;
+        linesAdded++;
         linesGenerated += linesAdded;
     }
     
@@ -1385,8 +1443,18 @@ function generateRandomPythonCode(options) {
         let requiredVars = 0;
 
         // Les conditions n'ajoutent pas nécessairement de variables
-        if (options.main_conditions && options.cond_if) {
-            requiredLines += options.cond_if_else ? 4 : 2;
+        if (options.main_conditions) {
+            if (options.cond_if) {
+                let simpleIfLines = 2;
+                if (options.cond_if_elif) simpleIfLines += 2;
+                if (options.cond_if_else || options.cond_if_elif_else) simpleIfLines += 2;
+                requiredLines += simpleIfLines;
+            }
+            if (options.cond_if_if) requiredLines += 3;
+            if (options.cond_if_if_if) requiredLines += 4;
+            if (options.cond_if || options.cond_if_if || options.cond_if_if_if) {
+                requiredVars = Math.max(requiredVars, 1);
+            }
         }
         
         // Boucles - chaque boucle a besoin d'au moins une variable d'itération
@@ -1601,7 +1669,7 @@ function generateRandomPythonCode(options) {
      */
     function ensureRequiredVariables() {
         // Pour les conditions
-        if (options.main_conditions && options.cond_if) { // replier le frame 'Ctrl' devrait vouloir dire 'pas de conditionnelles'
+        if (options.main_conditions && (options.cond_if || options.cond_if_if || options.cond_if_if_if)) { // replier le frame 'Ctrl' devrait vouloir dire 'pas de conditionnelles'
             if (declaredVarsByType.bool.length === 0 && declaredVarsByType.int.length === 0) {
                 // Préférer créer une variable bool car plus explicite pour les conditions
                 ensureVariableExists('bool'); // Utiliser la nouvelle fonction propre
