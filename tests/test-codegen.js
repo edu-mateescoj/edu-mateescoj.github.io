@@ -4,6 +4,87 @@
 
 document.addEventListener('DOMContentLoaded', () => {
 
+    function withFixedRandom(randomValue, callback) {
+        const originalRandom = Math.random;
+        Math.random = () => randomValue;
+
+        try {
+            return callback();
+        } finally {
+            Math.random = originalRandom;
+        }
+    }
+
+    function withSeededRandom(seed, callback) {
+        const originalRandom = Math.random;
+        let currentSeed = seed >>> 0;
+
+        Math.random = () => {
+            currentSeed = (currentSeed * 1664525 + 1013904223) >>> 0;
+            return currentSeed / 4294967296;
+        };
+
+        try {
+            return callback();
+        } finally {
+            Math.random = originalRandom;
+        }
+    }
+
+    function extractWhileBodyOperations(code) {
+        const lines = code.split('\n');
+        const whileIndex = lines.findIndex(line => line.trim().startsWith('while '));
+
+        if (whileIndex === -1) {
+            return [];
+        }
+
+        return lines
+            .slice(whileIndex + 1)
+            .filter(line => line.startsWith('    '))
+            .map(line => line.trim())
+            .filter(line => !line.includes('Limite de sécurité'))
+            .filter(line => !line.includes('Décrémenter la limite de sécurité'))
+            .filter(line => !line.includes('Garantir la progression vers la sortie'));
+    }
+
+    function countMostIndentedLines(code) {
+        const nonEmptyLines = code.split('\n').filter(line => line.trim() !== '');
+        const maxIndent = nonEmptyLines.reduce((currentMax, line) => {
+            const indentSize = line.match(/^\s*/)[0].length;
+            return Math.max(currentMax, indentSize);
+        }, 0);
+
+        return nonEmptyLines.filter(line => line.match(/^\s*/)[0].length === maxIndent).length;
+    }
+
+    function extractLoopBlock(code, headerPrefix) {
+        const lines = code.split('\n');
+        const startIndex = lines.findIndex(line => line.trim().startsWith(headerPrefix));
+
+        if (startIndex === -1) {
+            return { header: '', body: [] };
+        }
+
+        const header = lines[startIndex].trim();
+        const body = [];
+
+        for (let lineIndex = startIndex + 1; lineIndex < lines.length; lineIndex++) {
+            const line = lines[lineIndex];
+
+            if (line.trim() === '') {
+                continue;
+            }
+            if (!line.startsWith('    ')) {
+                break;
+            }
+
+            body.push(line.trim());
+        }
+
+        return { header, body };
+    }
+
     describe("Générateur de Code Python", () => {
 
         it("Doit générer un code non vide", async () => {
@@ -58,6 +139,126 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             const code = generateRandomPythonCode(options);
             expect(code).toContain('def ');
+        });
+
+        it("Doit générer un while avec opérateur logique si demandé", async () => {
+            const options = {
+                difficultyLevelGlobal: 3,
+                numLinesGlobal: 10,
+                numTotalVariablesGlobal: 5,
+                main_loops: true,
+                loop_while_op: true
+            };
+            const code = generateRandomPythonCode(options);
+
+            expect(code).toContain('while ');
+            expect(code).toMatch(/while .*\b(and|or|not)\b.*:/);
+        });
+
+        it("Doit simplifier les while faciles", async () => {
+            const code = withFixedRandom(0.35, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 3,
+                main_loops: true,
+                loop_while: true
+            }));
+
+            const whileBodyLines = extractWhileBodyOperations(code);
+            expect(whileBodyLines.length).toBeGreaterThan(0);
+            expect(whileBodyLines[0].includes('*')).toBe(false);
+            expect(whileBodyLines[0].includes('//')).toBe(false);
+            expect(whileBodyLines[0].includes('%')).toBe(false);
+        });
+
+        it("Doit simplifier while{op} quand la difficulté baisse", async () => {
+            const code = withFixedRandom(0.95, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 4,
+                main_loops: true,
+                loop_while_op: true
+            }));
+
+            const whileLine = code.split('\n').find(line => line.trim().startsWith('while '));
+            expect(whileLine).toBeDefined();
+            expect(whileLine.includes(' or ')).toBe(false);
+            expect(whileLine.includes('not ')).toBe(false);
+        });
+
+        it("Doit enrichir les nested if quand la difficulté monte", async () => {
+            const lowDifficultyCode = withSeededRandom(12345, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 6,
+                numTotalVariablesGlobal: 3,
+                main_conditions: true,
+                cond_if_if: true
+            }));
+            const highDifficultyCode = withSeededRandom(12345, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 3,
+                main_conditions: true,
+                cond_if_if: true
+            }));
+
+            expect(countMostIndentedLines(highDifficultyCode)).toBeGreaterThan(countMostIndentedLines(lowDifficultyCode));
+        });
+
+        it("Doit garder for_list lisible quand la difficulté est basse", async () => {
+            const code = withSeededRandom(24680, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 6,
+                numTotalVariablesGlobal: 3,
+                main_loops: true,
+                loop_for_list: true,
+                var_list_count: 1
+            }));
+            const loopBlock = extractLoopBlock(code, 'for ');
+
+            expect(loopBlock.header).toContain(' in ');
+            expect(loopBlock.body.length).toBeGreaterThan(0);
+            expect(loopBlock.body[0]).toContain('str(');
+        });
+
+        it("Doit garder for_str simple au niveau facile", async () => {
+            const code = withSeededRandom(13579, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 6,
+                numTotalVariablesGlobal: 3,
+                main_loops: true,
+                loop_for_str: true,
+                var_str_count: 1
+            }));
+            const loopBlock = extractLoopBlock(code, 'for ');
+
+            expect(loopBlock.header).toContain(' in ');
+            expect(loopBlock.body.length).toBe(1);
+            expect(loopBlock.body[0]).notToContain('.upper()');
+        });
+
+        it("Doit enrichir for_str quand la difficulté monte", async () => {
+            const easyCode = withSeededRandom(97531, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 6,
+                numTotalVariablesGlobal: 3,
+                main_loops: true,
+                loop_for_str: true,
+                var_str_count: 1
+            }));
+            const hardCode = withSeededRandom(97531, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 10,
+                numTotalVariablesGlobal: 3,
+                main_loops: true,
+                loop_for_str: true,
+                var_str_count: 1
+            }));
+
+            const easyLoopBlock = extractLoopBlock(easyCode, 'for ');
+            const hardLoopBlock = extractLoopBlock(hardCode, 'for ');
+
+            expect(hardLoopBlock.body.length).toBeGreaterThan(easyLoopBlock.body.length);
         });
 
         it("Ne doit pas générer d'erreurs JS sur 50 générations aléatoires", async () => {

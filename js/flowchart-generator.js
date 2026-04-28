@@ -47,7 +47,6 @@ async function initPyodideAndLoadScript() {
         // 2. Charger les packages nécessaires
         // 'micropip' est souvent nécessaire pour installer d'autres libs, 'autopep8' pour le formatage si utilisé
         await pyodide.loadPackage(["micropip"]);
-        const micropip = pyodide.pyimport("micropip");
         // await micropip.install('autopep8'); // Décommenter si nécessaire
 
         // 3. Connecter la fonction d'input JS à Python
