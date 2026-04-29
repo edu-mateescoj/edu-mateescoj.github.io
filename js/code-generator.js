@@ -221,6 +221,224 @@ function generateRandomPythonCode(options) {
         return declareVariable(type);
     }
 
+    let hasGeneratedRequestedSlice = false;
+
+    function getAllowedOperationFamilies() {
+        const hasExplicitArithmeticSelection = Boolean(
+            options.op_plus_minus || options.op_mult_div_pow || options.op_modulo_floor
+        );
+
+        return {
+            arithmetic: {
+                plusMinus: Boolean(options.op_plus_minus) || !hasExplicitArithmeticSelection,
+                multDivPow: Boolean(options.op_mult_div_pow),
+                moduloFloor: Boolean(options.op_modulo_floor)
+            },
+            slicing: {
+                ab: Boolean(options.op_slice_ab),
+                abs: Boolean(options.op_slice_abs)
+            }
+        };
+    }
+
+    function hasRequestedSlices() {
+        const slicing = getAllowedOperationFamilies().slicing;
+        return slicing.ab || slicing.abs;
+    }
+
+    function hasExplicitLogicalSelection() {
+        return Boolean(options.op_and || options.op_or || options.op_not);
+    }
+
+    function getRequestedLogicalOperators() {
+        const operators = [];
+
+        if (options.op_and) operators.push('and');
+        if (options.op_or) operators.push('or');
+        if (options.op_not) operators.push('not');
+
+        return operators;
+    }
+
+    function getAllowedLogicalOperators() {
+        const explicitOperators = getRequestedLogicalOperators();
+        return explicitOperators.length > 0 ? explicitOperators : ['and', 'or', 'not'];
+    }
+
+    function lineContainsLogicalOperator(line, operator) {
+        if (typeof line !== 'string') {
+            return false;
+        }
+
+        const normalized = ` ${line.trim()} `;
+
+        if (operator === 'not') {
+            return normalized.includes(' not ');
+        }
+        if (operator === 'and') {
+            return normalized.includes(' and ');
+        }
+        if (operator === 'or') {
+            return normalized.includes(' or ');
+        }
+
+        return false;
+    }
+
+    function getAllowedArithmeticOperatorPool(type) {
+        const arithmetic = getAllowedOperationFamilies().arithmetic;
+        const operators = [];
+
+        if (arithmetic.plusMinus) {
+            operators.push('+', '-', '+=', '-=');
+        }
+        if (arithmetic.multDivPow) {
+            if (type === 'str') {
+                operators.push('*', '*=');
+            } else {
+                operators.push('*', '/', '**', '*=', '/=');
+            }
+        }
+        if (arithmetic.moduloFloor && type !== 'str') {
+            operators.push('//', '%', '//=', '%=');
+        }
+
+        return operators;
+    }
+
+    function getSequenceLengthHint(sequenceName) {
+        const metadata = variableRegistry[sequenceName];
+        if (metadata && Number.isInteger(metadata.length) && metadata.length > 0) {
+            return metadata.length;
+        }
+
+        return Math.max(3, Math.min(6, difficulty + 2));
+    }
+
+    function buildSliceExpression(sourceName, preferredKind = null) {
+        const slicing = getAllowedOperationFamilies().slicing;
+        const availableKinds = [];
+
+        if (slicing.ab) availableKinds.push('ab');
+        if (slicing.abs) availableKinds.push('abs');
+        if (availableKinds.length === 0) return null;
+
+        const selectedKind = preferredKind && availableKinds.includes(preferredKind)
+            ? preferredKind
+            : getRandomItem(availableKinds);
+        const sequenceLength = Math.max(2, getSequenceLengthHint(sourceName));
+
+        if (selectedKind === 'ab') {
+            const sliceVariant = getRandomItem(['a:b', ':b', 'a:']);
+
+            if (sliceVariant === 'a:b') {
+                const start = getRandomInt(0, sequenceLength - 2);
+                const end = getRandomInt(start + 1, sequenceLength);
+                return `[${start}:${end}]`;
+            }
+
+            if (sliceVariant === ':b') {
+                return `[:${getRandomInt(1, sequenceLength)}]`;
+            }
+
+            return `[${getRandomInt(0, sequenceLength - 1)}:]`;
+        }
+
+        const step = getRandomInt(1, Math.min(3, sequenceLength));
+        const sliceVariant = getRandomItem(['a:b:s', '::s']);
+
+        if (sliceVariant === 'a:b:s') {
+            const start = getRandomInt(0, sequenceLength - 2);
+            const end = getRandomInt(start + 1, sequenceLength);
+            return `[${start}:${end}:${step}]`;
+        }
+
+        return `[::${step}]`;
+    }
+
+    function buildSliceAssignment(type, targetName, sourceName = targetName, preferredKind = null) {
+        if (!['str', 'list'].includes(type)) {
+            return null;
+        }
+
+        const sliceExpression = buildSliceExpression(sourceName, preferredKind);
+        if (!sliceExpression) {
+            return null;
+        }
+
+        hasGeneratedRequestedSlice = true;
+        return `${targetName} = ${sourceName}${sliceExpression}`;
+    }
+
+    function getSliceOperationBuilders(type, varName) {
+        if (!['str', 'list'].includes(type)) {
+            return [];
+        }
+
+        const slicing = getAllowedOperationFamilies().slicing;
+        const builders = [];
+
+        if (slicing.ab) {
+            builders.push(() => buildSliceAssignment(type, varName, varName, 'ab'));
+        }
+        if (slicing.abs) {
+            builders.push(() => buildSliceAssignment(type, varName, varName, 'abs'));
+        }
+
+        return builders;
+    }
+
+    // Détecte une opération de slicing Python (forme [a:b] ou [a:b:s]) sur une ligne générée.
+    function isSliceOperation(line) {
+        if (typeof line !== 'string') {
+            return false;
+        }
+
+        // Un slicing Python contient toujours au moins un ':' à l'intérieur des crochets.
+        return /\[[^\]\n]*:[^\]\n]*\]/.test(line);
+    }
+
+    function getBeginnerMutationHint(line) {
+        if (!line || line.trim().startsWith('#')) {
+            return null;
+        }
+
+        const hintRules = [
+            { regex: /\.append\(/, hint: 'append(...) ajoute un element en fin de liste.' },
+            { regex: /\.extend\(/, hint: 'extend(...) ajoute plusieurs elements en fin de liste.' },
+            { regex: /\.insert\(/, hint: 'insert(i, x) insere x a la position i.' },
+            { regex: /\.pop\(/, hint: 'pop(i) retire et renvoie l element a la position i.' },
+            { regex: /\.remove\(/, hint: 'remove(x) retire la premiere occurrence de x.' },
+            { regex: /\.sort\(/, hint: 'sort() trie la liste sur place.' },
+            { regex: /\.upper\(/, hint: 'upper() met le texte en majuscules.' },
+            { regex: /\.lower\(/, hint: 'lower() met le texte en minuscules.' },
+            { regex: /\.title\(/, hint: 'title() met chaque mot avec une initiale majuscule.' },
+            { regex: /\.capitalize\(/, hint: 'capitalize() met la premiere lettre en majuscule.' },
+            { regex: /\.replace\(/, hint: 'replace(a, b) remplace le texte a par b.' },
+            { regex: /\.strip\(/, hint: 'strip() retire les espaces en debut et fin de texte.' }
+        ];
+
+        const matchedRule = hintRules.find(rule => rule.regex.test(line));
+        return matchedRule ? matchedRule.hint : null;
+    }
+
+    function annotateBeginnerMutationLine(line) {
+        const hint = getBeginnerMutationHint(line);
+        if (!hint) {
+            return line;
+        }
+
+        if (line.includes('NB:')) {
+            return line;
+        }
+
+        if (line.includes('#')) {
+            return `${line} | NB: ${hint}`;
+        }
+
+        return `${line}  # NB: ${hint}`;
+    }
+
     // "patch" dans la phase d'initialisation pour éviter bug du nombre de listes insuffisant
     // pour les options var_list_count
     function ensureListVariablesCount() {
@@ -608,25 +826,36 @@ function generateRandomPythonCode(options) {
 
     function generateDifficultyAwareIntOperation(varName, level = difficulty) {
         const difficultyTier = getDifficultyTier(level);
+        const arithmetic = getAllowedOperationFamilies().arithmetic;
+        const operations = [];
+        const step = getRandomInt(1, difficultyTier === 'easy' ? 2 : 3);
 
-        if (difficultyTier === 'easy') {
-            const step = getRandomInt(1, 2);
-            return getRandomItem([
-                `${varName} = ${varName} + ${step}`,
-                `${varName} += ${step}`
-            ]);
+        if (arithmetic.plusMinus) {
+            operations.push(`${varName} = ${varName} + ${step}`);
+            operations.push(`${varName} += ${step}`);
+
+            if (difficultyTier !== 'easy') {
+                operations.push(`${varName} -= ${step}`);
+            }
         }
 
-        if (difficultyTier === 'medium') {
-            const step = getRandomInt(1, 3);
-            return getRandomItem([
-                `${varName} = ${varName} + ${step}`,
-                `${varName} += ${step}`,
-                `${varName} -= ${step}`
-            ]);
+        if (arithmetic.multDivPow && (difficultyTier !== 'easy' || operations.length === 0)) {
+            operations.push(`${varName} = ${varName} * ${getRandomInt(2, Math.max(2, Math.min(4, level + 1)))}`);
         }
 
-        return generateVariedOperation('int', varName, level).replace(/;$/, '');
+        if (arithmetic.moduloFloor && (difficultyTier === 'hard' || operations.length === 0)) {
+            operations.push(`${varName} = ${varName} // ${getRandomInt(2, Math.max(2, Math.min(4, level + 1)))}`);
+        }
+
+        if (difficultyTier === 'hard' && operations.length > 0) {
+            return generateVariedOperation('int', varName, level).replace(/;$/, '');
+        }
+
+        if (operations.length === 0) {
+            operations.push(`${varName} = ${varName} + 1`);
+        }
+
+        return getRandomItem(operations);
     }
 
     function generateDifficultyAwareConditionalStatement(level = difficulty) {
@@ -640,23 +869,40 @@ function generateRandomPythonCode(options) {
 
     function generateDifficultyAwareStringOperation(varName, level = difficulty) {
         const difficultyTier = getDifficultyTier(level);
+        const arithmetic = getAllowedOperationFamilies().arithmetic;
+        const operations = [];
 
-        if (difficultyTier === 'easy') {
-            return getRandomItem([
-                `${varName} += "!"`,
-                `${varName} = ${varName} + " fin"`
-            ]);
+        if (arithmetic.plusMinus) {
+            operations.push(() => `${varName} += "!"`);
+            operations.push(() => `${varName} = ${varName} + " fin"`);
         }
 
-        if (difficultyTier === 'medium') {
-            return getRandomItem([
-                `${varName} += "!"`,
-                `${varName} = ${varName} + " fin"`,
-                `${varName} = ${varName}.upper()`
-            ]);
+        if (arithmetic.multDivPow) {
+            const repeatCount = getRandomInt(2, Math.max(2, Math.floor(level / 2) + 1));
+            operations.push(() => `${varName} = ${varName} * ${repeatCount}`);
+
+            if (difficultyTier !== 'easy') {
+                operations.push(() => `${varName} *= ${repeatCount}`);
+            }
         }
 
-        return generateVariedOperation('str', varName, level).replace(/;$/, '');
+        if (difficultyTier !== 'easy') {
+            operations.push(() => `${varName} = ${varName}.upper()`);
+        }
+
+        if (difficultyTier === 'hard') {
+            operations.push(...getSliceOperationBuilders('str', varName));
+        }
+
+        if (difficultyTier === 'hard' && operations.length > 0) {
+            return generateVariedOperation('str', varName, level).replace(/;$/, '');
+        }
+
+        if (operations.length === 0) {
+            operations.push(() => `${varName} = ${varName}`);
+        }
+
+        return getRandomItem(operations)();
     }
 
     function buildForListDirectOperation(targetType, targetVar, loopVar) {
@@ -695,13 +941,7 @@ function generateRandomPythonCode(options) {
 
     // Réutilise les opérateurs logiques explicitement demandés, sinon autorise toute la famille.
     function getWhileLogicalOperators(structureDifficulty = difficulty) {
-        const operators = [];
-
-        if (options.op_and) operators.push('and');
-        if (options.op_or) operators.push('or');
-        if (options.op_not) operators.push('not');
-
-        const availableOperators = operators.length > 0 ? operators : ['and', 'or', 'not'];
+        const availableOperators = getAllowedLogicalOperators();
         const difficultyTier = getDifficultyTier(structureDifficulty);
 
         if (difficultyTier === 'easy') {
@@ -940,45 +1180,31 @@ function generateRandomPythonCode(options) {
             }
             case 'function': {
                 const params = contextOptions.params || [];
-                const paramTypes = contextOptions.paramTypes || params.map(() => 'int'); // Par défaut, considérer int
-    
-                // Un nom de variable locale pour les calculs internes
-                const localResultVar = getRandomItem(["local_result","func_output","result","output"]); 
-                
-                // Plus de variété dans les opérations du corps de fonction
+                const paramTypes = contextOptions.paramTypes || params.map(() => 'int');
+                const localResultVar = getRandomItem(["local_result", "func_output", "result", "output"]);
                 const operations = [];
-                
-                if (params.length > 0) {
-                    // La première instruction utilise un paramètre, c'est crucial.
-                    const firstParam = params[0];
-                    const firstType = paramTypes[0]; // Utiliser le type du premier paramètre
+                const arithmeticFamilies = getAllowedOperationFamilies().arithmetic;
+                const slicingFamilies = getAllowedOperationFamilies().slicing;
+                const bodyDifficulty = contextOptions.difficulty || difficulty;
 
-                    // Opération de base qui dépend du type probable du paramètre
+                if (params.length > 0) {
+                    const firstParam = params[0];
+                    const firstType = paramTypes[0];
+
                     switch (firstType) {
-                        case 'str':
-                            // Opérations sur chaînes
-                            
-                            // --- CORRECTION MAJEURE ---
-                            // On vérifie si on connait la longueur de la variable (cas global)
-                            // ou si c'est un paramètre (longueur inconnue -> code défensif)
-                            
-                            let accessIndex = 0;
+                        case 'str': {
                             let safeAccessCode = "";
-                            
+
                             if (variableRegistry[firstParam]) {
-                                // Cas 1 : Variable globale connue
                                 const len = variableRegistry[firstParam].length;
                                 if (len > 0) {
-                                    accessIndex = getRandomInt(0, len - 1);
-                                    // On est sûr que ça ne plantera pas
+                                    const accessIndex = getRandomInt(0, len - 1);
                                     safeAccessCode = `${indent}${localResultVar} = ${firstParam}[${accessIndex}] + "_" + ${firstParam}`;
                                 } else {
                                     safeAccessCode = `${indent}${localResultVar} = "vide"`;
                                 }
                             } else {
-                                // Cas 2 : Paramètre de fonction (longueur inconnue)
-                                // On génère un code pédagogique avec if len()
-                                const targetIdx = getRandomInt(1, 4); // On tente d'accéder à l'index 1, 2, 3 ou 4
+                                const targetIdx = getRandomInt(1, 4);
                                 safeAccessCode = [
                                     `${indent}if len(${firstParam}) > ${targetIdx}:`,
                                     `${indent}    ${localResultVar} = ${firstParam}[${targetIdx}]  # Accès sécurisé`,
@@ -989,23 +1215,31 @@ function generateRandomPythonCode(options) {
 
                             const stringOps = [
                                 `${indent}${localResultVar} = ${firstParam}.upper()`,
-                                `${indent}${localResultVar} = ${firstParam} + " processed"`,
-                                safeAccessCode // Utilisation de notre code sécurisé
+                                safeAccessCode
                             ];
-                            operations.push(getRandomItem(stringOps));
+                            if (arithmeticFamilies.plusMinus) {
+                                stringOps.push(`${indent}${localResultVar} = ${firstParam} + " processed"`);
+                            }
+                            if (slicingFamilies.ab) {
+                                stringOps.push(`${indent}${buildSliceOperation(localResultVar, firstParam, 'ab')}`);
+                            }
+                            if (slicingFamilies.abs) {
+                                stringOps.push(`${indent}${buildSliceOperation(localResultVar, firstParam, 'abs')}`);
+                            }
+
+                            const selectedStringOp = getRandomItem(stringOps.filter(Boolean));
+                            if (isSliceOperation(selectedStringOp)) {
+                                hasGeneratedRequestedSlice = true;
+                            }
+                            operations.push(selectedStringOp);
                             break;
-                            
-                        case 'list':
-                            // Initialiser avant toute utilisation
+                        }
+                        case 'list': {
                             operations.push(`${indent}${localResultVar} = []`);
 
-                            // Opérations sur listes - conditionnées par les options ou la difficulté
-                            const useAdvancedListOps = contextOptions.difficulty >= 4 || options.builtin_isinstance || options.builtin_len;
-                            
-                            // --- CORRECTION LISTES ---
+                            const useAdvancedListOps = bodyDifficulty >= 4 || options.builtin_isinstance || options.builtin_len;
                             let listAccessCode = "";
                             if (variableRegistry[firstParam]) {
-                                // Variable connue
                                 const len = variableRegistry[firstParam].length;
                                 if (len > 0) {
                                     const idx = getRandomInt(0, len - 1);
@@ -1014,7 +1248,6 @@ function generateRandomPythonCode(options) {
                                     listAccessCode = `${indent}${localResultVar} = 0`;
                                 }
                             } else {
-                                // Paramètre inconnu : Code défensif pédagogique
                                 listAccessCode = [
                                     `${indent}if len(${firstParam}) > 0:`,
                                     `${indent}    ${localResultVar} = ${firstParam}[0]`,
@@ -1023,170 +1256,245 @@ function generateRandomPythonCode(options) {
                                 ].join('\n');
                             }
 
-                            // Version basique des opérations sur listes (sans len/isinstance)
-                            const basicListOps = [
-                                `${indent}${localResultVar}.append(${getRandomInt(1, 5)})`,
-                                listAccessCode // Notre accès sécurisé
+                            const basicListOptions = [
+                                [`${indent}${localResultVar}.append(${getRandomInt(1, 5)})`],
+                                [listAccessCode]
                             ];
-                            
-                            // Version avancée des opérations sur listes (avec len/isinstance)
-                            const advancedListOps1 = [
-                                `${indent}if isinstance(${localResultVar}, list):`,
-                                `${indent}    ${localResultVar}.append(${getRandomInt(1, 5)})`,
-                                `${indent}else:`,
-                                `${indent}    ${localResultVar} = [${localResultVar}]`
-                            ];
-                            const advancedListOps2 = [
-                                `${indent}if len(${firstParam}) > 0:`,
-                                `${indent}    ${localResultVar} = ${firstParam}[0]`,
-                                `${indent}else:`,
-                                `${indent}    ${localResultVar} = 0`
-                            ];
-                            let selectedOps;
-                            if (useAdvancedListOps) {
-                                selectedOps = getRandomItem([advancedListOps1, advancedListOps2]);
-                            } else {
-                                selectedOps = basicListOps;
+                            if (slicingFamilies.ab) {
+                                basicListOptions.push([`${indent}${buildSliceOperation(localResultVar, firstParam, 'ab')}`]);
                             }
-                            // Ajouter UNIQUEMENT les opérations sélectionnées
-                            selectedOps.forEach(op => operations.push(op));
-                            break;
+                            if (slicingFamilies.abs) {
+                                basicListOptions.push([`${indent}${buildSliceOperation(localResultVar, firstParam, 'abs')}`]);
+                            }
 
-                        case 'bool':
-                            // Cas spécifique pour les booléens pour éviter les opérations arithmétiques non désirées
+                            const advancedListOptions = [
+                                [
+                                    `${indent}if isinstance(${localResultVar}, list):`,
+                                    `${indent}    ${localResultVar}.append(${getRandomInt(1, 5)})`,
+                                    `${indent}else:`,
+                                    `${indent}    ${localResultVar} = [${localResultVar}]`
+                                ],
+                                [
+                                    `${indent}if len(${firstParam}) > 0:`,
+                                    `${indent}    ${localResultVar} = ${firstParam}[0]`,
+                                    `${indent}else:`,
+                                    `${indent}    ${localResultVar} = 0`
+                                ]
+                            ];
+
+                            const selectedListOps = useAdvancedListOps
+                                ? getRandomItem([...advancedListOptions, ...basicListOptions])
+                                : getRandomItem(basicListOptions);
+                            selectedListOps.forEach(op => {
+                                if (isSliceOperation(op)) {
+                                    hasGeneratedRequestedSlice = true;
+                                }
+                                operations.push(op);
+                            });
+                            break;
+                        }
+                        case 'bool': {
                             const boolOps = [
                                 `${indent}${localResultVar} = not ${firstParam}`,
                                 `${indent}${localResultVar} = ${firstParam} and ${getRandomItem(['True', 'False'])}`,
                                 `${indent}${localResultVar} = ${firstParam} or ${getRandomItem(['True', 'False'])}`
                             ];
+                            if (bodyDifficulty >= 5 && arithmeticFamilies.plusMinus) {
+                                boolOps.push(`${indent}${localResultVar} = ${localResultVar} + ${getRandomInt(0, 1)}`);
+                            }
+                            if (bodyDifficulty >= 5 && arithmeticFamilies.multDivPow) {
+                                boolOps.push(`${indent}${localResultVar} = ${getRandomInt(1, 3)} * ${localResultVar}`);
+                            }
                             operations.push(getRandomItem(boolOps));
                             break;
-
+                        }
                         case 'int':
                         case 'float':
-                        default:
-                            // Opérations arithmétiques avec paramètre(s)
+                        default: {
                             if (params.length >= 2 && ['int', 'float'].includes(paramTypes[1])) {
-                                // Si on a deux paramètres numériques, on peut faire des opérations entre eux
                                 const secondParam = params[1];
-                                const arithmeticOps = [
-                                    `${indent}${localResultVar} = ${firstParam} + ${secondParam}`,
-                                    `${indent}${localResultVar} = ${firstParam} - ${secondParam}`,
-                                    `${indent}${localResultVar} = ${firstParam} * ${secondParam}`,
-                                    `${indent}if ${secondParam} != 0:`,
-                                    `${indent}    ${localResultVar} = ${firstParam} / ${secondParam}`,
-                                    `${indent}else:`,
-                                    `${indent}    ${localResultVar} = ${firstParam}`
-                                ];
-                                // Choisir entre division sécurisée et autre opération
-                                if (Math.random() > 0.5) {
-                                    operations.push(getRandomItem(arithmeticOps.slice(0, 3)));
-                                } else {
-                                    operations.push(...arithmeticOps.slice(3));
+                                const arithmeticOps = [];
+
+                                if (arithmeticFamilies.plusMinus) {
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} + ${secondParam}`]);
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} - ${secondParam}`]);
                                 }
+                                if (arithmeticFamilies.multDivPow) {
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} * ${secondParam}`]);
+                                    arithmeticOps.push([
+                                        `${indent}if ${secondParam} != 0:`,
+                                        `${indent}    ${localResultVar} = ${firstParam} / ${secondParam}`,
+                                        `${indent}else:`,
+                                        `${indent}    ${localResultVar} = ${firstParam}`
+                                    ]);
+                                }
+                                if (arithmeticFamilies.moduloFloor) {
+                                    arithmeticOps.push([
+                                        `${indent}if ${secondParam} != 0:`,
+                                        `${indent}    ${localResultVar} = ${firstParam} // ${secondParam}`,
+                                        `${indent}else:`,
+                                        `${indent}    ${localResultVar} = ${firstParam}`
+                                    ]);
+                                    arithmeticOps.push([
+                                        `${indent}if ${secondParam} != 0:`,
+                                        `${indent}    ${localResultVar} = ${firstParam} % ${secondParam}`,
+                                        `${indent}else:`,
+                                        `${indent}    ${localResultVar} = ${firstParam}`
+                                    ]);
+                                }
+
+                                const selectedOps = arithmeticOps.length > 0
+                                    ? getRandomItem(arithmeticOps)
+                                    : [`${indent}${localResultVar} = ${firstParam}`];
+                                selectedOps.forEach(op => operations.push(op));
                             } else {
-                                // Opérations arithmétiques variées avec un paramètre numérique
-                                const mathConstant = Math.floor(Math.random() * 5) + 2; // Nombre entre 2 et 6
-                                const arithmeticOps = [
-                                    `${indent}${localResultVar} = ${firstParam} * ${mathConstant}`,
-                                    `${indent}${localResultVar} = ${firstParam} + ${mathConstant}`,
-                                    `${indent}${localResultVar} = ${firstParam} - ${mathConstant}`,
-                                    `${indent}${localResultVar} = ${firstParam} ** 2`,  // Carré
-                                    `${indent}${localResultVar} = ${firstParam} // ${mathConstant}`  // Division entière
-                                ];
-                                operations.push(getRandomItem(arithmeticOps));
+                                const mathConstant = Math.floor(Math.random() * 5) + 2;
+                                const arithmeticOps = [];
+
+                                if (arithmeticFamilies.plusMinus) {
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} + ${mathConstant}`]);
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} - ${mathConstant}`]);
+                                }
+                                if (arithmeticFamilies.multDivPow) {
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} * ${mathConstant}`]);
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} ** 2`]);
+                                }
+                                if (arithmeticFamilies.moduloFloor) {
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} // ${mathConstant}`]);
+                                    arithmeticOps.push([`${indent}${localResultVar} = ${firstParam} % ${mathConstant}`]);
+                                }
+
+                                const selectedOps = arithmeticOps.length > 0
+                                    ? getRandomItem(arithmeticOps)
+                                    : [`${indent}${localResultVar} = ${firstParam}`];
+                                selectedOps.forEach(op => operations.push(op));
                             }
+                            break;
+                        }
                     }
                 } else {
-                    // Si pas de paramètre, on initialise quand même une variable locale.
                     operations.push(`${indent}${localResultVar} = ${getRandomInt(1, 10)}`);
                 }
-                
-                // Ajouter une ou plusieurs opérations intermédiaires selon la difficulté
-                const resultType = params.length > 0 ? paramTypes[0] : 'int'; // Type par défaut
-                const numOperationsTarget = Math.max(1, Math.min(3, Math.floor(contextOptions.difficulty / 2)));
-            
-                // Instructions intermédiaires adaptées au type du résultat
-                if (operations.length < numOperationsTarget) {
-                    for (let i = 0; i < numOperationsTarget; i++) {
-                    switch (resultType) {
-                        case 'str':
-                            const strOps = [
-                                `${indent}${localResultVar} += "_modified"`,
-                                `${indent}if len(${localResultVar}) > ${getRandomInt(1, 3)}:`,
-                                `${indent}    ${localResultVar} = ${localResultVar}.upper()`,
-                                `${indent}else:`,
-                                `${indent}    ${localResultVar} += "_extended"`
-                            ];
-                            // Choisir entre opération simple et conditionnelle
-                            if (Math.random() > 0.5 || i === 0) {
-                                operations.push(strOps[0]);
-                            } else {
-                                operations.push(...strOps.slice(1));
-                            }
-                            break;
-                            
-                        case 'list':
-                            const listOps = [
-                                `${indent}if isinstance(${localResultVar}, list):`,
-                                `${indent}    ${localResultVar}.append(${getRandomInt(1, 5)})`,
-                                `${indent}else:`,
-                                `${indent}    ${localResultVar} = [${localResultVar}]`
-                            ];
-                            operations.push(...listOps);
-                            break;
-                        
-                        case 'bool':
-                        // Opérations uniquement logiques pour les booléens, peu importe la difficulté
-                            const boolOps = [
-                                `${indent}${localResultVar} = not ${localResultVar}`,
-                                `${indent}${localResultVar} = ${localResultVar} and ${getRandomItem(['True', 'False'])}`,
-                                `${indent}${localResultVar} = ${localResultVar} or ${getRandomItem(['True', 'False'])}`
-                            ];
-                            
-                        // Les opérations arithmétiques sur les booléens uniquement pour difficulté >= 5
-                        if (contextOptions.difficulty >= 5) {
-                            boolOps.push(`${indent}${localResultVar} = ${localResultVar} + ${getRandomInt(0, 1)}`);  // En Python, True + 1 = 2, False + 1 = 1
-                            boolOps.push(`${indent}${localResultVar} = ${getRandomInt(1, 3)} * ${localResultVar}`);  // En Python, 2 * True = 2, 2 * False = 0
-                        }    
-                            operations.push(getRandomItem(boolOps));
-                            break;    
 
-                        case 'int':
-                        case 'float':
-                        default:
-                            const numOps = [
-                                `${indent}${localResultVar} += ${getRandomInt(1, 5)}`,
-                                `${indent}${localResultVar} *= ${getRandomInt(2, 4)}`,
-                                `${indent}if ${localResultVar} > ${getRandomInt(10, 20)}:`,
-                                `${indent}    ${localResultVar} -= ${getRandomInt(1, 5)}`,
-                                `${indent}else:`,
-                                `${indent}    ${localResultVar} += ${getRandomInt(1, 3)}`
-                            ];
-                            // Choisir entre opération simple et conditionnelle
-                            if (Math.random() > 0.6 || i === 0) {
-                                operations.push(getRandomItem(numOps.slice(0, 2)));
-                            } else {
-                                operations.push(...numOps.slice(2));
+                const resultType = params.length > 0 ? paramTypes[0] : 'int';
+                const numOperationsTarget = Math.max(1, Math.min(3, Math.floor(bodyDifficulty / 2)));
+
+                if (operations.length < numOperationsTarget) {
+                    for (let operationIndex = 0; operationIndex < numOperationsTarget; operationIndex++) {
+                        switch (resultType) {
+                            case 'str': {
+                                const simpleStrOps = [[`${indent}${localResultVar} = ${localResultVar}.upper()`]];
+                                const conditionalStrOps = [];
+
+                                if (arithmeticFamilies.plusMinus) {
+                                    simpleStrOps.push([`${indent}${localResultVar} += "_modified"`]);
+                                    conditionalStrOps.push([
+                                        `${indent}if len(${localResultVar}) > ${getRandomInt(1, 3)}:`,
+                                        `${indent}    ${localResultVar} = ${localResultVar}.upper()`,
+                                        `${indent}else:`,
+                                        `${indent}    ${localResultVar} += "_extended"`
+                                    ]);
+                                }
+                                if (slicingFamilies.ab) {
+                                    simpleStrOps.push([`${indent}${buildSliceOperation(localResultVar, localResultVar, 'ab')}`]);
+                                }
+                                if (slicingFamilies.abs) {
+                                    simpleStrOps.push([`${indent}${buildSliceOperation(localResultVar, localResultVar, 'abs')}`]);
+                                }
+
+                                const selectedStrOps = conditionalStrOps.length > 0 && Math.random() <= 0.5 && operationIndex !== 0
+                                    ? getRandomItem(conditionalStrOps)
+                                    : getRandomItem(simpleStrOps.filter(item => item.every(Boolean)));
+                                selectedStrOps.forEach(op => {
+                                    if (isSliceOperation(op)) {
+                                        hasGeneratedRequestedSlice = true;
+                                    }
+                                    operations.push(op);
+                                });
+                                break;
+                            }
+                            case 'list': {
+                                const listOptions = [
+                                    [
+                                        `${indent}if isinstance(${localResultVar}, list):`,
+                                        `${indent}    ${localResultVar}.append(${getRandomInt(1, 5)})`,
+                                        `${indent}else:`,
+                                        `${indent}    ${localResultVar} = [${localResultVar}]`
+                                    ]
+                                ];
+                                if (slicingFamilies.ab) {
+                                    listOptions.push([`${indent}${buildSliceOperation(localResultVar, localResultVar, 'ab')}`]);
+                                }
+                                if (slicingFamilies.abs) {
+                                    listOptions.push([`${indent}${buildSliceOperation(localResultVar, localResultVar, 'abs')}`]);
+                                }
+
+                                getRandomItem(listOptions.filter(item => item.every(Boolean))).forEach(op => {
+                                    if (isSliceOperation(op)) {
+                                        hasGeneratedRequestedSlice = true;
+                                    }
+                                    operations.push(op);
+                                });
+                                break;
+                            }
+                            case 'bool': {
+                                const boolOps = [
+                                    `${indent}${localResultVar} = not ${localResultVar}`,
+                                    `${indent}${localResultVar} = ${localResultVar} and ${getRandomItem(['True', 'False'])}`,
+                                    `${indent}${localResultVar} = ${localResultVar} or ${getRandomItem(['True', 'False'])}`
+                                ];
+                                if (bodyDifficulty >= 5 && arithmeticFamilies.plusMinus) {
+                                    boolOps.push(`${indent}${localResultVar} = ${localResultVar} + ${getRandomInt(0, 1)}`);
+                                }
+                                if (bodyDifficulty >= 5 && arithmeticFamilies.multDivPow) {
+                                    boolOps.push(`${indent}${localResultVar} = ${getRandomInt(1, 3)} * ${localResultVar}`);
+                                }
+                                operations.push(getRandomItem(boolOps));
+                                break;
+                            }
+                            case 'int':
+                            case 'float':
+                            default: {
+                                const simpleNumOps = [];
+                                const conditionalNumOps = [];
+
+                                if (arithmeticFamilies.plusMinus) {
+                                    simpleNumOps.push([`${indent}${localResultVar} += ${getRandomInt(1, 5)}`]);
+                                    conditionalNumOps.push([
+                                        `${indent}if ${localResultVar} > ${getRandomInt(10, 20)}:`,
+                                        `${indent}    ${localResultVar} -= ${getRandomInt(1, 5)}`,
+                                        `${indent}else:`,
+                                        `${indent}    ${localResultVar} += ${getRandomInt(1, 3)}`
+                                    ]);
+                                }
+                                if (arithmeticFamilies.multDivPow) {
+                                    simpleNumOps.push([`${indent}${localResultVar} *= ${getRandomInt(2, 4)}`]);
+                                }
+                                if (arithmeticFamilies.moduloFloor) {
+                                    simpleNumOps.push([`${indent}${localResultVar} //= ${getRandomInt(2, 4)}`]);
+                                }
+
+                                const selectedNumOps = conditionalNumOps.length > 0 && Math.random() <= 0.4 && operationIndex !== 0
+                                    ? getRandomItem(conditionalNumOps)
+                                    : (simpleNumOps.length > 0 ? getRandomItem(simpleNumOps) : [[`${indent}${localResultVar} = ${localResultVar}`]]);
+                                selectedNumOps.forEach(op => operations.push(op));
+                                break;
                             }
                         }
                     }
                 }
-                // Ajouter les opérations au corps de la fonction
+
                 bodyLines.push(...operations);
 
-
-            // L'instruction de retour est toujours la dernière
-            if (contextOptions.hasReturn) {
-                bodyLines.push(`${indent}return ${localResultVar}`);
-            } else if (contextOptions.hasPrint) {
-                // Utiliser la conversion str() explicite ou formatage avec virgules pour éviter l'erreur de type
-                if (resultType === 'str') {
-                    bodyLines.push(`${indent}print("Résultat: " + ${localResultVar})`);
-                } else {
-                    bodyLines.push(`${indent}print("Résultat:", ${localResultVar})`);
+                if (contextOptions.hasReturn) {
+                    bodyLines.push(`${indent}return ${localResultVar}`);
+                } else if (contextOptions.hasPrint) {
+                    if (resultType === 'str') {
+                        bodyLines.push(`${indent}print("Résultat: " + ${localResultVar})`);
+                    } else {
+                        bodyLines.push(`${indent}print("Résultat:", ${localResultVar})`);
+                    }
                 }
-            }
                 break;
             }
             default:
@@ -1846,6 +2154,65 @@ function generateRandomPythonCode(options) {
         if (options.loop_while_op && declaredVarsByType.bool.length === 0) {
             ensureVariableExists('bool');
         }
+
+        if (hasRequestedSlices() && declaredVarsByType.str.length === 0 && declaredVarsByType.list.length === 0) {
+            ensureVariableExists(options.var_list_count > 0 ? 'list' : 'str');
+        }
+    }
+
+    function ensureRequestedSliceOperation() {
+        if (!hasRequestedSlices() || hasGeneratedRequestedSlice) {
+            return;
+        }
+
+        let sliceType;
+        const availableTypes = ['str', 'list'].filter(type => declaredVarsByType[type].length > 0);
+
+        if (availableTypes.length > 0) {
+            sliceType = getRandomItem(availableTypes);
+        } else {
+            sliceType = options.var_list_count > 0 ? 'list' : 'str';
+            ensureVariableExists(sliceType);
+        }
+
+        const sliceVar = ensureVariableExists(sliceType);
+        const operation = buildSliceAssignment(sliceType, sliceVar);
+
+        if (operation && !codeLines.some(line => line.trim() === operation.trim())) {
+            codeLines.push(operation);
+            linesGenerated++;
+        }
+    }
+
+    function ensureRequestedLogicalOperations() {
+        const requestedOperators = getRequestedLogicalOperators();
+
+        if (requestedOperators.length === 0) {
+            return;
+        }
+
+        const boolVar = ensureVariableExists('bool');
+
+        requestedOperators.forEach(operator => {
+            const alreadyPresent = codeLines.some(line => lineContainsLogicalOperator(line, operator));
+            if (alreadyPresent) {
+                return;
+            }
+
+            let operation;
+            if (operator === 'not') {
+                operation = `${boolVar} = not ${boolVar}`;
+            } else if (operator === 'and') {
+                operation = `${boolVar} = ${boolVar} and ${getRandomItem(['True', 'False'])}`;
+            } else {
+                operation = `${boolVar} = ${boolVar} or ${getRandomItem(['True', 'False'])}`;
+            }
+
+            if (!codeLines.some(line => line.trim() === operation.trim())) {
+                codeLines.push(operation);
+                linesGenerated++;
+            }
+        });
     }
     /**
      * fonction pour ajouter des opérations simples pour compléter le nombre de lignes requis.
@@ -1939,115 +2306,171 @@ function generateRandomPythonCode(options) {
 }
 
     function generateVariedOperation(type, varName, difficulty) {
-        // Tableau d'opérations possibles selon le type
-        const operations = {
-            'int': [
-                // Incrémentation avec différentes syntaxes
-                () => `${varName} = ${varName} + ${getRandomInt(1, difficulty+1)}`,
-                () => `${varName} = ${getRandomInt(1, difficulty+1)} + ${varName}`,
-                // Autres opérations arithmétiques
-                () => `${varName} = ${varName} * ${getRandomInt(2, difficulty+1)}`,
-                () => `${varName} = ${getRandomInt(2, difficulty+1)} *  ${varName}`,
-                () => `${varName} = ${varName} // ${getRandomInt(2, difficulty+1)}`,
-                // Avec commentaire
+        const allowedFamilies = getAllowedOperationFamilies();
+
+        const intOperations = [];
+        if (allowedFamilies.arithmetic.plusMinus) {
+            intOperations.push(
+                () => `${varName} = ${varName} + ${getRandomInt(1, difficulty + 1)}`,
+                () => `${varName} = ${getRandomInt(1, difficulty + 1)} + ${varName}`,
                 () => `${varName} += ${getRandomInt(1, 3)}  # Incrémenter ${varName}`,
                 () => `${varName} -= ${getRandomInt(1, 3)}  # Décrémenter ${varName}`,
-                // Affectation conditionnelle
-                ...(difficulty >= 5 ? [() => `${varName} = ${getRandomInt(-10, 10)} if ${varName} < 0 else ${varName} # syntaxe compacte (niveau plus avancé)`] : []),
-                () => `${varName} += ${getRandomInt(1, 5)}`,
-                // spread operator : expression ternaire pour condition "... sinon : rien"
+                () => `${varName} += ${getRandomInt(1, 5)}`
+            );
+        }
+        if (allowedFamilies.arithmetic.multDivPow) {
+            intOperations.push(
+                () => `${varName} = ${varName} * ${getRandomInt(2, difficulty + 1)}`,
+                () => `${varName} = ${getRandomInt(2, difficulty + 1)} * ${varName}`,
                 ...(difficulty >= 5 ? [() => `${varName} *= ${getRandomInt(2, 3)}`] : []),
+                ...(difficulty >= 5 ? [() => `${varName} = ${varName} ** 2`] : [])
+            );
+        }
+        if (allowedFamilies.arithmetic.moduloFloor) {
+            intOperations.push(
+                () => `${varName} = ${varName} // ${getRandomInt(2, difficulty + 1)}`,
                 ...(difficulty >= 5 ? [() => `${varName} //= ${getRandomInt(2, 3)}`] : []),
-                ...(difficulty >= 5 ? [() => `${varName} %= ${getRandomInt(2, 3)}`] : [])
-            ],
-            'str': [
-                // Concaténation avec différentes syntaxes
+                ...(difficulty >= 5 ? [() => `${varName} %= ${getRandomInt(2, 3)}`] : []),
+                ...(difficulty >= 5 ? [() => `${varName} = ${varName} % ${getRandomInt(2, difficulty + 1)}`] : [])
+            );
+        }
+        if (difficulty >= 5) {
+            intOperations.push(() => `${varName} = ${getRandomInt(-10, 10)} if ${varName} < 0 else ${varName} # syntaxe compacte (niveau plus avancé)`);
+        }
+
+        const strOperations = [];
+        if (allowedFamilies.arithmetic.plusMinus) {
+            strOperations.push(
                 () => `${varName} = " ${getRandomItem(["texte", "donnée", "valeur", "info"])}" + ${varName}`,
                 () => `${varName} = ${varName} + " ${getRandomItem(["ajout", "extension", "suite"])}"`,
+                () => `${varName} += "!!!"  # Ajouter une emphase !!!`,
+                ...(difficulty >= 5 ? [() => `${varName} += " (modifié)" if len(${varName}) < 20 else ""`] : []),
+                () => `${varName} = "Début: " + ${varName}`,
+                () => `${varName} = ${varName} + " Fin"`
+            );
+        }
+        if (allowedFamilies.arithmetic.multDivPow) {
+            strOperations.push(
                 () => `${varName} = ${varName} * ${getRandomInt(2, Math.max(2, Math.floor(difficulty / 2) + 1))}  # Répétition de chaîne`,
                 () => `${varName} = ${getRandomInt(2, Math.max(2, Math.floor(difficulty / 2) + 1))} * ${varName}  # Répétition de chaîne`,
-                // Remplacement
-                ...(difficulty >= 3 ? [
-                    () => {
-                        const randomIndex = getRandomInt(0, 2); // Limiter à 3 premiers caractères pour éviter IndexError
-                        return `${varName} = ${varName}.replace(${varName}[${randomIndex}], ${varName}[${randomIndex}].upper())  # Remplace le caractère à l'index ${randomIndex}`;
-                    }
-                ] : []),
-                // suppression de caractères
+                () => `${varName} *= ${getRandomInt(2, Math.max(2, Math.floor(difficulty / 2) + 1))}  # Répétition de chaîne`
+            );
+        }
+        if (difficulty >= 3) {
+            strOperations.push(
                 () => {
-                    const randomIndex = getRandomInt(0, 1); // Éviter de supprimer trop de caractères
+                    const randomIndex = getRandomInt(0, 2);
+                    return `${varName} = ${varName}.replace(${varName}[${randomIndex}], ${varName}[${randomIndex}].upper())  # Remplace le caractère à l'index ${randomIndex}`;
+                },
+                () => {
+                    const randomIndex = getRandomInt(0, 1);
                     return `${varName} = ${varName}.replace(${varName}[${randomIndex}], "")  # Supprime un caractère`;
                 },
-                // Avec commentaire
-                () => `${varName} *= ${getRandomInt(2, Math.max(2, Math.floor(difficulty / 2) + 1))}  # Répétition de chaîne`,
-                () => `${varName} += "!!!"  # Ajouter une emphase !!!`,
-                // Opérations conditionnelles
-                ...(difficulty >= 5 ? [() => `${varName} += " (modifié)" if len(${varName}) < 20 else ""`] : []),
-                // Insertion de texte
-                () => `${varName} = "Début: " + ${varName}`,
-                () => `${varName} = ${varName} + " Fin"`,
-                // Opérations avancées
-                ...(difficulty >= 3 ? [() => `${varName} = ${varName}.upper()`] : []),
-                ...(difficulty >= 3 ? [() => `${varName} = ${varName}.lower()`] : []),
-                ...(difficulty >= 3 ? [() => `${varName} = ${varName}.capitalize()`] : []),
-                ...(difficulty >= 3 ? [() => `${varName} = ${varName}.title()`] : [])
-            ],
-            'list': [
-                // Ajout d'éléments à la liste
-                () => `${varName}.append(${getRandomInt(1, 10)})`,
-                () => `${varName}.extend([${getRandomInt(1, difficulty)}, ${getRandomInt(difficulty+1, difficulty+5 )}])`,
-                // si la liste est non vide: on accède à des positions spécifiques
-                // CORRECTION : Utiliser un index petit (0) car les listes générées ont au moins 2 éléments.
-                // L'ancienne logique utilisait declaredVarsByType.list.length (nombre de variables) ce qui était illogique et risqué.
-                ...(declaredVarsByType.list.length > 0 ? [
-                    () => `${varName}[0] = ${getRandomInt(1, difficulty+6)}`] : []),
-                // Insertion d'éléments
-                ...(difficulty >= 4 ? [
-                    // insert est safe en Python même si l'index est hors bornes (ça append), mais restons cohérents
-                    () => `${varName}.insert(${getRandomInt(0, 1)}, ${getRandomInt(-difficulty, +difficulty)})`] : []),
-                // Suppression d'éléments
-                ...(declaredVarsByType.list.length > 0 ? [
-                    () => `if len(${varName}) > 0: ${varName}.pop(0) # Suppression du premier élément`
-                ] : [])
-            ],
-            'bool': [
-                // Opérations logiques de base avec valeur booléenne
-                () => `${varName} = not ${varName}`,
-                () => `${varName} = ${getRandomItem(['True', 'False'])} or ${getRandomItem(['True', 'False'])}`,
-                () => `${varName} = ${getRandomItem(['True', 'False'])} and ${getRandomItem(['True', 'False'])}`,
-                // comparaison de valeurs aléatoires: confronter vite les élèves aux = et ==
-                () => `${varName} = ${getRandomInt(-difficulty,difficulty)} ${getRandomItem(['==', '!=', '<', '>'])} ${getRandomInt(-difficulty, difficulty)}`,
-                () => `${varName} = ${getRandomItem(['True', 'False'])} ${getRandomItem(['==', '!='])} ${getRandomItem(['True', 'False'])}`,
-                // Opérations logiques de base
-                ...(difficulty >= 2 ? [
-                    () => `${varName} = ${getRandomItem(['True', 'False'])} ${getRandomItem(['or','and'])} ${getRandomItem(['True', 'False'])}  # Opération logique`,
-                    () => `${varName} = ${getRandomInt(-difficulty,difficulty)} ${getRandomItem(['==', '!=', '<', '>', '<=', '>='])} ${getRandomInt(-difficulty, difficulty)}`,   
-                    () => `${varName} = ${varName} ${getRandomItem(['or','and'])} ${getRandomItem(['True', 'False'])}  # Opération logique`,
-                    () => `${varName} = ${getRandomItem(['True', 'False'])} ${getRandomItem(['or','and'])} ${varName}  # Opération logique`
-                ]: []), 
-                // Affectation conditionnelle avancée
-                ...(difficulty >= 4 ? [
-                    () => `${varName} = ${varName} if ${getRandomItem(['True', 'False'])} else not ${varName}  # Opération conditionnelle avancée`,
-                    () => `${varName} = ${varName} != ${getRandomItem(['True', 'False'])}  # Opération avancée`
-                ]: []),
-                    // Opérations avancées
-                ...(difficulty >= 5 ? [
-                    () => `${varName} = ${varName} + ${getRandomInt(0, 1)}  # Opération arithmétique sur booléen (niveau avancé)`,
-                    () => `${varName} = ${getRandomInt(1, 3)} * ${varName}  # Opération arithmétique sur booléen (niveau avancé)`
-                ]: [])
-                ],
-            'float': [
+                () => `${varName} = ${varName}.upper()`,
+                () => `${varName} = ${varName}.lower()`,
+                () => `${varName} = ${varName}.capitalize()`,
+                () => `${varName} = ${varName}.title()`
+            );
+        }
+        strOperations.push(...getSliceOperationBuilders('str', varName));
+
+        const listOperations = [
+            () => `${varName}.append(${getRandomInt(1, 10)})`,
+            () => `${varName}.extend([${getRandomInt(1, difficulty)}, ${getRandomInt(difficulty + 1, difficulty + 5)}])`,
+            ...(declaredVarsByType.list.length > 0 ? [
+                () => `${varName}[0] = ${getRandomInt(1, difficulty + 6)}`
+            ] : []),
+            ...(difficulty >= 4 ? [
+                () => `${varName}.insert(${getRandomInt(0, 1)}, ${getRandomInt(-difficulty, difficulty)})`
+            ] : []),
+            ...(declaredVarsByType.list.length > 0 ? [
+                () => `if len(${varName}) > 0: ${varName}.pop(0) # Suppression du premier élément`
+            ] : [])
+        ];
+        listOperations.push(...getSliceOperationBuilders('list', varName));
+
+        const logicalOperators = getAllowedLogicalOperators();
+        const boolLogicalOperations = [];
+
+        if (logicalOperators.includes('not')) {
+            boolLogicalOperations.push(() => `${varName} = not ${varName}`);
+            if (difficulty >= 4) {
+                boolLogicalOperations.push(() => `${varName} = ${varName} if ${getRandomItem(['True', 'False'])} else not ${varName}  # Opération conditionnelle avancée`);
+            }
+        }
+
+        if (logicalOperators.includes('and')) {
+            boolLogicalOperations.push(() => `${varName} = ${getRandomItem(['True', 'False'])} and ${getRandomItem(['True', 'False'])}`);
+            if (difficulty >= 2) {
+                boolLogicalOperations.push(() => `${varName} = ${varName} and ${getRandomItem(['True', 'False'])}  # Opération logique`);
+                boolLogicalOperations.push(() => `${varName} = ${getRandomItem(['True', 'False'])} and ${varName}  # Opération logique`);
+            }
+        }
+
+        if (logicalOperators.includes('or')) {
+            boolLogicalOperations.push(() => `${varName} = ${getRandomItem(['True', 'False'])} or ${getRandomItem(['True', 'False'])}`);
+            if (difficulty >= 2) {
+                boolLogicalOperations.push(() => `${varName} = ${varName} or ${getRandomItem(['True', 'False'])}  # Opération logique`);
+                boolLogicalOperations.push(() => `${varName} = ${getRandomItem(['True', 'False'])} or ${varName}  # Opération logique`);
+            }
+        }
+
+        const boolComparisonOperations = [
+            () => `${varName} = ${getRandomInt(-difficulty, difficulty)} ${getRandomItem(['==', '!=', '<', '>'])} ${getRandomInt(-difficulty, difficulty)}`,
+            () => `${varName} = ${getRandomItem(['True', 'False'])} ${getRandomItem(['==', '!='])} ${getRandomItem(['True', 'False'])}`,
+            ...(difficulty >= 2 ? [
+                () => `${varName} = ${getRandomInt(-difficulty, difficulty)} ${getRandomItem(['==', '!=', '<', '>', '<=', '>='])} ${getRandomInt(-difficulty, difficulty)}`
+            ] : []),
+            ...(difficulty >= 4 ? [
+                () => `${varName} = ${varName} != ${getRandomItem(['True', 'False'])}  # Opération avancée`
+            ] : [])
+        ];
+
+        const boolOperations = hasExplicitLogicalSelection()
+            ? [...boolLogicalOperations]
+            : [...boolLogicalOperations, ...boolComparisonOperations];
+        if (difficulty >= 5 && allowedFamilies.arithmetic.plusMinus) {
+            boolOperations.push(() => `${varName} = ${varName} + ${getRandomInt(0, 1)}  # Opération arithmétique sur booléen (niveau avancé)`);
+        }
+        if (difficulty >= 5 && allowedFamilies.arithmetic.multDivPow) {
+            boolOperations.push(() => `${varName} = ${getRandomInt(1, 3)} * ${varName}  # Opération arithmétique sur booléen (niveau avancé)`);
+        }
+
+        const floatOperations = [];
+        if (allowedFamilies.arithmetic.plusMinus) {
+            floatOperations.push(
                 () => `${varName} = ${varName} + ${(Math.random() * difficulty + 0.1).toFixed(1)}`,
                 () => `${varName} = ${varName} - ${(Math.random() * difficulty + 0.1).toFixed(1)}`,
+                () => `${varName} += ${(Math.random() * 2 + 0.1).toFixed(1)}`,
+                () => `${varName} -= ${(Math.random() * 2 + 0.1).toFixed(1)}`
+            );
+        }
+        if (allowedFamilies.arithmetic.multDivPow) {
+            floatOperations.push(
                 () => `${varName} = ${varName} * ${(1 + Math.random()).toFixed(1)}`,
                 () => `${varName} = ${varName} / ${(1 + Math.random()).toFixed(1)}`,
-                () => `${varName} += ${(Math.random() * 2 + 0.1).toFixed(1)}`,
-                () => `${varName} -= ${(Math.random() * 2 + 0.1).toFixed(1)}`,
                 ...(difficulty >= 3 ? [
                     () => `${varName} *= ${(1.5 + Math.random()).toFixed(3)}`,
                     () => `${varName} /= ${(1.5 + Math.random()).toFixed(3)}`
                 ] : [])
-            ]// + Autres??
+            );
+        }
+        if (allowedFamilies.arithmetic.moduloFloor) {
+            floatOperations.push(
+                () => `${varName} = ${varName} // ${(1 + Math.random()).toFixed(1)}`,
+                () => `${varName} = ${varName} % ${(1 + Math.random()).toFixed(1)}`,
+                ...(difficulty >= 3 ? [
+                    () => `${varName} %= ${(1.5 + Math.random()).toFixed(3)}`
+                ] : [])
+            );
+        }
+
+        const operations = {
+            int: intOperations.length > 0 ? intOperations : [() => `${varName} = ${varName} + 1`],
+            str: strOperations.length > 0 ? strOperations : [() => `${varName} = ${varName}`],
+            list: listOperations,
+            bool: boolOperations,
+            float: floatOperations.length > 0 ? floatOperations : [() => `${varName} = ${varName} + 1.0`]
         };
         
         // Vérifier si une opération identique a déjà été générée récemment
@@ -2093,7 +2516,7 @@ function generateRandomPythonCode(options) {
 
             // Extraction de l'opérateur actuel si présent
             // Recherche des opérateurs arithmétiques avec ou sans signe égal
-            const operatorMatch = operation.match(/[+\-*\/\/%]=?/);
+            const operatorMatch = operation.match(/(\*\*|\/\/=|\/\/|%=|\*=|\/=|\+=|-=|[+\-*\/%])/);
             const currentOperator = operatorMatch ? operatorMatch[0] : null;
 
             if (currentNumber !== null) {
@@ -2108,12 +2531,17 @@ function generateRandomPythonCode(options) {
                 // Utilise la même expression régulière pour cibler le remplacement
                 operation = operation.replace(/\d+(?![^)]*\))/, newValue);
             } 
-            else if (currentOperator) {
+            else if (currentOperator && type !== 'str' && type !== 'list') {
                 // Génération d'un opérateur différent
                 // Sélectionne un nouvel opérateur parmi ceux disponibles, en excluant l'actuel
-                const operators = ['+', '-', '*', '//'];
-                const newOperator = getRandomItem(operators.filter(op => op !== currentOperator));
-                operation = operation.replace(currentOperator, newOperator);
+                const operators = getAllowedArithmeticOperatorPool(type).filter(op => op !== currentOperator);
+                if (operators.length > 0) {
+                    const newOperator = getRandomItem(operators);
+                    operation = operation.replace(currentOperator, newOperator);
+                } else {
+                    operation = operation.replace(/\s*#.*$/, '') +
+                        `  # unique_${Math.random().toString(36).substr(2, 5)}`;
+                }
             }
             else {
                 // Solution de repli : ajout d'un commentaire unique
@@ -2125,30 +2553,39 @@ function generateRandomPythonCode(options) {
         // Traitement spécifique pour les opérations sur chaînes de caractères
         if (type === 'str') {
             // Regex pour détecter les opérateurs arithmétiques invalides pour les chaînes (sauf + et *)
-            const invalidArithmeticRegex = /([^\w\s"'])\s*=/; // Détecte -=, /=, //=, %=
-            const invalidBinaryOpRegex = /\s([-\/]|[/]{2}|%)\s/; // Détecte -, /, //, % entre opérandes
+            const invalidArithmeticRegex = /(?:-=|\/=|\/\/=|%=)/;
+            const invalidBinaryOpRegex = /\s(?:-|\/|\/\/|%)\s/;
 
             if (invalidArithmeticRegex.test(operation) || invalidBinaryOpRegex.test(operation)) {
                 // Si l'opération est invalide, la remplacer par une opération de chaîne valide
                 // Generate a more varied replacement based on difficulty
                 let chosenLetter = varName[getRandomInt(0, varName.length - 1)];
                 const replacements = [
-                    `${varName} += " modifié"`,
-                    `${varName} = ${varName} + "_suffix"`,
-                    `${varName} = "prefix_" + ${varName}`,
-                    `${varName} = ${varName}.replace(${varName}[0], ${varName}[0].upper())`,  // Remplacer la première lettre
-                    `${varName} = ${varName}[0] + ${varName}`, // Add first character again
-                    `${varName} = ${varName}.replace("${chosenLetter}", "${chosenLetter.toUpperCase()}")`,  // Remplacer une lettre aléatoire par sa majuscule
+                    () => `${varName} = ${varName}.replace(${varName}[0], ${varName}[0].upper())`,
+                    () => `${varName} = ${varName}.replace("${chosenLetter}", "${chosenLetter.toUpperCase()}")`,
                 ];
+
+                if (allowedFamilies.arithmetic.plusMinus) {
+                    replacements.push(
+                        () => `${varName} += " modifié"`,
+                        () => `${varName} = ${varName} + "_suffix"`,
+                        () => `${varName} = "prefix_" + ${varName}`,
+                        () => `${varName} = ${varName}[0] + ${varName}`
+                    );
+                }
+                if (allowedFamilies.arithmetic.multDivPow) {
+                    replacements.push(() => `${varName} = ${varName} * ${getRandomInt(2, Math.max(2, Math.floor(difficulty / 2) + 1))}`);
+                }
                 
                 // pour les difficultés plus élevées, ajouter des opérations plus complexes
                 if (difficulty >= 3) {
-                    replacements.push(`${varName} = ${varName}.upper()`);
-                    replacements.push(`${varName} = ${varName}.capitalize()`);
+                    replacements.push(() => `${varName} = ${varName}.upper()`);
+                    replacements.push(() => `${varName} = ${varName}.capitalize()`);
                 }
+                replacements.push(...getSliceOperationBuilders('str', varName));
                 
                 // choisit un replacement random
-                operation = getRandomItem(replacements);
+                operation = getRandomItem(replacements)();
                 
                 // ajout pour expliquer d'où vient la substitution
                 operation += "  # Opération de chaîne valide";
@@ -2198,6 +2635,7 @@ function generateRandomPythonCode(options) {
     ensureVariablesForOptions(); // 
     ensureListVariablesCount(); // pour garantir le bon nombre de listes
     ensureTypeSpecificOperations(); // Assure au moins une opération par type demandé
+    ensureRequestedSliceOperation(); // Garantit au moins un slice si demandé
    
     // 3. Générer les structures de contrôle avec des corps enrichis
     generateControlStructures();
@@ -2209,6 +2647,9 @@ function generateRandomPythonCode(options) {
     while (linesGenerated < targetLines) {
         if (!addFiller()) break; // Sortir si impossible d'ajouter plus d'opérations
     }
+
+    // Garantit que les opérateurs booléens explicitement cochés sont présents.
+    ensureRequestedLogicalOperations();
     
     // 6. Vérification finale
     finalVariableCheck();
@@ -2220,6 +2661,9 @@ function generateRandomPythonCode(options) {
         codeLines.push("resultat = x + y");
     }
 
+    // Ajoute une aide contextuelle concise pour les syntaxes inhabituelles.
+    const annotatedCodeLines = codeLines.map(annotateBeginnerMutationLine);
+
     // Finalement... Retour du code généré ...
-    return codeLines.join("\n");
+    return annotatedCodeLines.join("\n");
 }

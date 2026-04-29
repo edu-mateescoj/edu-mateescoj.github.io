@@ -1480,6 +1480,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     });
 
+    // Corriger le warning de DevTools : CodeMirror cree une textarea interne sans id/name
+    const cmInput = codeEditorInstance.getInputField();
+    if (cmInput && !cmInput.id && !cmInput.name) {
+        cmInput.name = 'code-editor-cm-input';
+    }
+
     applyTheme(savedTheme);
 
     const themeToggleBtn = document.getElementById('theme-toggle');

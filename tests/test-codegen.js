@@ -85,6 +85,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return { header, body };
     }
 
+    function stripInlineComments(code) {
+        return code
+            .split('\n')
+            .map(line => line.replace(/\s*#.*$/, ''))
+            .join('\n');
+    }
+
+    function hasAdvancedArithmeticOperators(code) {
+        const sanitizedCode = stripInlineComments(code);
+        return /(\*\*|\/\/=|\/\/|%=|\*=|\/=| \* | \/ | % )/.test(sanitizedCode);
+    }
+
     describe("Générateur de Code Python", () => {
 
         it("Doit générer un code non vide", async () => {
@@ -259,6 +271,88 @@ document.addEventListener('DOMContentLoaded', () => {
             const hardLoopBlock = extractLoopBlock(hardCode, 'for ');
 
             expect(hardLoopBlock.body.length).toBeGreaterThan(easyLoopBlock.body.length);
+        });
+
+        it("Doit limiter l'arithmétique par défaut à plus et moins", async () => {
+            const seeds = [101, 202, 303, 404, 505];
+
+            seeds.forEach(seed => {
+                const code = withSeededRandom(seed, () => generateRandomPythonCode({
+                    difficultyLevelGlobal: 6,
+                    numLinesGlobal: 18,
+                    numTotalVariablesGlobal: 6,
+                    var_int_count: 2,
+                    var_float_count: 1,
+                    var_str_count: 1,
+                    var_bool_count: 1,
+                    main_functions: true,
+                    func_def_ab: true
+                }));
+
+                expect(hasAdvancedArithmeticOperators(code)).toBe(false);
+            });
+        });
+
+        it("Doit respecter plus/minus seul sans opérateurs avancés", async () => {
+            const seeds = [606, 707, 808, 909, 1001];
+
+            seeds.forEach(seed => {
+                const code = withSeededRandom(seed, () => generateRandomPythonCode({
+                    difficultyLevelGlobal: 6,
+                    numLinesGlobal: 18,
+                    numTotalVariablesGlobal: 6,
+                    var_int_count: 2,
+                    var_float_count: 1,
+                    var_str_count: 1,
+                    main_functions: true,
+                    func_def_ab: true,
+                    op_plus_minus: true,
+                    op_mult_div_pow: false,
+                    op_modulo_floor: false
+                }));
+
+                expect(hasAdvancedArithmeticOperators(code)).toBe(false);
+            });
+        });
+
+        it("Doit garantir un slice simple quand op_slice_ab est demandé", async () => {
+            const code = withFixedRandom(0.25, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 4,
+                numLinesGlobal: 6,
+                numTotalVariablesGlobal: 2,
+                op_slice_ab: true
+            }));
+
+            expect(code).toMatch(/\[[^:\]\n]*:[^:\]\n]*\]/);
+        });
+
+        it("Doit garantir un slice avec pas quand op_slice_abs est demandé", async () => {
+            const code = withFixedRandom(0.75, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 4,
+                numLinesGlobal: 6,
+                numTotalVariablesGlobal: 2,
+                op_slice_abs: true
+            }));
+
+            expect(code).toMatch(/\[[^\]\n]*:[^\]\n]*:[1-9]\d*\]/);
+        });
+
+        it("Doit respecter les opérateurs booléens cochés (or/not)", async () => {
+            const code = withSeededRandom(424242, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 3,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 4,
+                var_bool_count: 1,
+                var_str_count: 1,
+                op_or: true,
+                op_not: true,
+                op_and: false,
+                op_slice_ab: true
+            }));
+
+            const normalizedCode = ` ${code} `;
+            expect(normalizedCode.includes(' or ') || normalizedCode.includes(' not ')).toBe(true);
+            expect(normalizedCode.includes(' and ')).toBe(false);
         });
 
         it("Ne doit pas générer d'erreurs JS sur 50 générations aléatoires", async () => {
