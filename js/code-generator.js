@@ -2154,7 +2154,8 @@ function generateRandomPythonCode(options) {
         }
         // Pour les boucles, la logique devrait être gérée DANS chaque fonction de boucle.
         
-        if (options.loop_for_list && declaredVarsByType.list.length === 0) {
+        // for_list sans list explicite doit pouvoir itérer sur une liste littérale.
+        if (options.loop_for_list && options.var_list_count > 0 && declaredVarsByType.list.length === 0) {
             ensureVariableExists('list');
         }
         if (options.loop_for_str && declaredVarsByType.str.length === 0) {

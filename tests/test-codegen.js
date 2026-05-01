@@ -233,6 +233,22 @@ document.addEventListener('DOMContentLoaded', () => {
             expect(loopBlock.body[0]).toContain('str(');
         });
 
+        it("Doit utiliser une liste littérale pour for_list sans var_list_count", async () => {
+            const code = withSeededRandom(86420, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 6,
+                numTotalVariablesGlobal: 3,
+                main_loops: true,
+                loop_for_list: true,
+                var_list_count: 0
+            }));
+            const loopBlock = extractLoopBlock(code, 'for ');
+
+            expect(loopBlock.header).toMatch(/^for\s+\w+\s+in\s+\[[^\]]*\]:$/);
+            expect(/^\s*\w+\s*=\s*\[[^\]]*\]/m.test(code)).toBe(false);
+            expect(loopBlock.body.length).toBeGreaterThan(0);
+        });
+
         it("Doit garder for_str simple au niveau facile", async () => {
             const code = withSeededRandom(13579, () => generateRandomPythonCode({
                 difficultyLevelGlobal: 1,

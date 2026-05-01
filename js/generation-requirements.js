@@ -60,7 +60,7 @@
             }
             if (options.loop_for_list) {
                 requiredLines += 2;
-                additionalVariables += (varCounts.list === 0 ? 2 : 1);
+                additionalVariables += 1;
             }
             if (options.loop_for_str) {
                 requiredLines += 2;

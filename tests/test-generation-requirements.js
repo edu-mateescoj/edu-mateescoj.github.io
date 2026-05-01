@@ -29,7 +29,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             expect(requirements.minLines).toBe(23);
-            expect(requirements.minVariables).toBe(14);
+            expect(requirements.minVariables).toBe(13);
+        });
+
+        it("Compte for_list avec un seul cout variable sans liste explicite", async () => {
+            const requirements = window.GenerationRequirements.calculateGenerationMinimums({
+                main_loops: true,
+                loop_for_list: true
+            });
+
+            expect(requirements.minLines).toBe(5);
+            expect(requirements.minVariables).toBe(2);
         });
 
         it("Calcule les minimums pour les fonctions", async () => {
