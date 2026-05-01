@@ -1294,11 +1294,20 @@ function generateRandomPythonCode(options) {
                             break;
                         }
                         case 'bool': {
-                            const boolOps = [
-                                `${indent}${localResultVar} = not ${firstParam}`,
-                                `${indent}${localResultVar} = ${firstParam} and ${getRandomItem(['True', 'False'])}`,
-                                `${indent}${localResultVar} = ${firstParam} or ${getRandomItem(['True', 'False'])}`
-                            ];
+                            const logicalOps = getAllowedLogicalOperators();
+                            const boolOps = [];
+                            if (logicalOps.includes('not')) {
+                                boolOps.push(`${indent}${localResultVar} = not ${firstParam}`);
+                            }
+                            if (logicalOps.includes('and')) {
+                                boolOps.push(`${indent}${localResultVar} = ${firstParam} and ${getRandomItem(['True', 'False'])}`);
+                            }
+                            if (logicalOps.includes('or')) {
+                                boolOps.push(`${indent}${localResultVar} = ${firstParam} or ${getRandomItem(['True', 'False'])}`);
+                            }
+                            if (boolOps.length === 0) {
+                                boolOps.push(`${indent}${localResultVar} = ${firstParam}`);
+                            }
                             if (bodyDifficulty >= 5 && arithmeticFamilies.plusMinus) {
                                 boolOps.push(`${indent}${localResultVar} = ${localResultVar} + ${getRandomInt(0, 1)}`);
                             }
@@ -2376,14 +2385,16 @@ function generateRandomPythonCode(options) {
 
         const listOperations = [
             () => `${varName}.append(${getRandomInt(1, 10)})`,
-            () => `${varName}.extend([${getRandomInt(1, difficulty)}, ${getRandomInt(difficulty + 1, difficulty + 5)}])`,
+            ...(difficulty >= 3 ? [
+                () => `${varName}.extend([${getRandomInt(1, difficulty)}, ${getRandomInt(difficulty + 1, difficulty + 5)}])`
+            ] : []),
             ...(declaredVarsByType.list.length > 0 ? [
                 () => `${varName}[0] = ${getRandomInt(1, difficulty + 6)}`
             ] : []),
             ...(difficulty >= 4 ? [
                 () => `${varName}.insert(${getRandomInt(0, 1)}, ${getRandomInt(-difficulty, difficulty)})`
             ] : []),
-            ...(declaredVarsByType.list.length > 0 ? [
+            ...(declaredVarsByType.list.length > 0 && difficulty >= 3 ? [
                 () => `if len(${varName}) > 0: ${varName}.pop(0) # Suppression du premier élément`
             ] : [])
         ];
