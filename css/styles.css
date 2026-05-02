@@ -12,6 +12,8 @@
     --syntax-number: #bd93f9;   /* Violet */
     --syntax-comment: #6272a4;  /* Gris bleu */
     --syntax-builtin: #8be9fd;  /* Cyan */
+    --cm-gutter-bg: #232530;
+    --cm-line-number: #8b92b5;
     
  /* Mermaid Spécifique (Mode Sombre - Haut Contraste) */
     --mermaid-node-bg: #282a36;     /* Fond des formes (sombre) */
@@ -34,6 +36,8 @@
     --syntax-number: #663399;   /* Violet profond */
     --syntax-comment: #586e75;  /* Gris moyen */
     --syntax-builtin: #0056b3;  /* Bleu roi */
+    --cm-gutter-bg: #f3f5f8;
+    --cm-line-number: #6b7280;
 
 /* Mermaid Spécifique (Mode Clair - Haut Contraste) */
     --mermaid-node-bg: #ffffff;     /* Fond blanc */
@@ -91,6 +95,16 @@
     /* CRITIQUE : empêcher le débordement vertical */
     max-height: 100% !important;
     overflow: hidden !important; /* Le scrolling sera géré par CodeMirror lui-même */
+}
+
+/* Numéros de ligne lisibles et distincts du code dans les deux thèmes */
+.CodeMirror-gutters {
+    background-color: var(--cm-gutter-bg) !important;
+    border-right: 1px solid var(--border-color) !important;
+}
+
+.CodeMirror-linenumber {
+    color: var(--cm-line-number) !important;
 }
 
 /* Surcharge des couleurs CodeMirror pour utiliser nos variables */
