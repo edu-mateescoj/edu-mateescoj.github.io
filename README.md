@@ -1,7 +1,6 @@
 # edu-mateescoj.github.io
 
 ## MyCFG.py: 
-- implémenter le 'break' (identifier sa destination en allant voir le dernier de la stack des noeuds terminaux)
 - verbosité des boucles !!
 -> for list: La variable (liste) 'ma_liste' contient des éléments? ... Le premier élément de 'ma_liste'...
 -> for string : c'est le contraire! dnas le code "ma_chaine" mais dnas le logigramme ma_chaine

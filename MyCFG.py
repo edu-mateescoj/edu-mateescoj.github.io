@@ -520,9 +520,10 @@ class ControlFlowGraph:
 
         if not skip_first_check:
             # 1. Première Décision: Y a-t-il des éléments à traiter ?
-            # Utiliser une formulation neutre pour le type d'itérable.
-            entry_decision_label = f"{iterable_kind_desc.capitalize()} {iterable_display_name}\
-                <br>contient des {elements_type_desc_raw}s ?" # Garder un pluriel simple avec 's'
+            entry_decision_label = (
+                f"{iterable_display_name}<br>"
+                f"contient {self._format_entry_elements_phrase(elements_type_desc_raw)} ?"
+            )
             entry_decision_id = self.add_node(entry_decision_label, node_type="Decision")
             self.add_edge(parent_id, entry_decision_id)
             current_parent_for_loop_structure = entry_decision_id
@@ -546,12 +547,13 @@ class ControlFlowGraph:
         retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans {iterable_display_name} ?"
         retest_decision_id = self.add_node(retest_decision_label, node_type="Decision")
         
+        next_element_phrase = self._join_article_and_noun(article_defini_element, elements_type_desc_raw)
         if article_indefini_element == "un":
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivant<br>de {iterable_display_name}"
+            next_var_label = f"{iterator_variable_str} ← {next_element_phrase} suivant<br>de {iterable_display_name}"
         elif article_indefini_element == "une":
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw} suivante<br>de {iterable_display_name}"
+            next_var_label = f"{iterator_variable_str} ← {next_element_phrase} suivante<br>de {iterable_display_name}"
         else: # "des" ou autre
-            next_var_label = f"{iterator_variable_str} ← {article_defini_element} {elements_type_desc_raw}s suivants<br>de {iterable_display_name}"
+            next_var_label = f"{iterator_variable_str} ← {next_element_phrase}s suivants<br>de {iterable_display_name}"
         next_var_id = self.add_node(next_var_label, node_type="Process")
 
         # --- Connexions et Flux ---
@@ -764,6 +766,104 @@ class ControlFlowGraph:
                 self.add_edge(parent_id, new_node_id)
             return [new_node_id]
 
+    def _get_constant_element_type(self, value: Any) -> str:
+        """Retourne un libellé court pour le type d'un élément littéral."""
+        if isinstance(value, bool):
+            return "booléen"
+        if isinstance(value, (int, float)):
+            return "nombre"
+        if isinstance(value, str):
+            return "caractère" if len(value) == 1 else "chaîne"
+        return "élément"
+
+    def _get_collection_element_type(self, collection_node: ast.AST) -> str:
+        """Infère un type d'élément homogène pour une collection littérale."""
+        element_nodes = getattr(collection_node, "elts", [])
+        if not element_nodes:
+            return "élément"
+
+        element_types_seen: Set[str] = set()
+        for element_node in element_nodes:
+            current_element_type = "élément"
+            if isinstance(element_node, ast.Constant):
+                current_element_type = self._get_constant_element_type(element_node.value)
+            # Les nombres signés sont représentés par UnaryOp(Constant(...)) dans l'AST.
+            # Sans ce cas, une liste homogène comme [5, -3, 4] devient à tort "mixte".
+            elif isinstance(element_node, ast.UnaryOp) and isinstance(element_node.op, (ast.UAdd, ast.USub)):
+                operand_node = element_node.operand
+                if isinstance(operand_node, ast.Constant) and isinstance(operand_node.value, (int, float)):
+                    current_element_type = "nombre"
+            elif isinstance(element_node, ast.Name):
+                current_element_type = "variable"
+            element_types_seen.add(current_element_type)
+
+        if len(element_types_seen) == 1:
+            return element_types_seen.pop()
+        if len(element_types_seen) > 1:
+            return "élément mixte"
+        return "élément"
+
+    def _get_plural_element_type(self, element_type: str) -> str:
+        """Normalise les pluriels utilisés dans les libellés Mermaid."""
+        plural_map = {
+            "caractère": "caractères",
+            "nombre": "nombres",
+            "chaîne": "chaînes",
+            "booléen": "booléens",
+            "clé": "clés",
+            "variable": "variables",
+            "élément": "éléments",
+            "élément mixte": "éléments mixtes",
+        }
+        return plural_map.get(element_type, f"{element_type}s")
+
+    def _describe_collection_assignment(self, collection_node: ast.AST) -> str:
+        """Stocke une description exploitable des éléments d'une collection nommée."""
+        container_names = {
+            ast.List: "liste",
+            ast.Tuple: "tuple",
+            ast.Set: "ensemble",
+        }
+        container_name = container_names.get(type(collection_node), "collection")
+        if not getattr(collection_node, "elts", []):
+            return f"{container_name} vide"
+
+        element_type = self._get_collection_element_type(collection_node)
+        if element_type == "élément mixte":
+            return f"{container_name} mixte"
+        return f"{container_name} de {self._get_plural_element_type(element_type)}"
+
+    def _get_element_type_from_assignment_description(self, description: Any) -> str:
+        """Relit les descriptions stockées par visit_Assign pour retrouver le type d'élément."""
+        if not isinstance(description, str):
+            return "élément"
+
+        if "caractères" in description:
+            return "caractère"
+        if "nombres" in description:
+            return "nombre"
+        if "chaînes" in description:
+            return "chaîne"
+        if "booléens" in description:
+            return "booléen"
+        if "clés" in description:
+            return "clé"
+        if "variables" in description:
+            return "variable"
+        if "mixte" in description:
+            return "élément mixte"
+        return "élément"
+
+    def _join_article_and_noun(self, article: str, noun: str) -> str:
+        """Assemble correctement un article et un nom, y compris pour l'."""
+        if article == "l'":
+            return f"{article}{noun}"
+        return f"{article} {noun}"
+
+    def _format_entry_elements_phrase(self, element_type: str) -> str:
+        """Retourne une forme courte pour les questions d'entrée de boucle."""
+        return f"des {self._get_plural_element_type(element_type)}"
+
     def visit_Assign(self, node: ast.Assign, parent_id: str) -> List[str]:
         """Visite une instruction d'assignation AST."""
         targets_str = ", ".join([ast.unparse(t).replace('"', '"') for t in node.targets])
@@ -786,9 +886,10 @@ class ControlFlowGraph:
                 if isinstance(value_node, ast.Constant):
                     self.variable_assignments[var_name] = (assigned_value_type_ast, value_node.value)
                 elif isinstance(value_node, (ast.List, ast.Tuple, ast.Set)):
-                    # Pour les collections, on pourrait analyser les éléments ici ou simplement stocker le type de collection.
-                    # Pour l'instant, stockons juste le type AST
-                    self.variable_assignments[var_name] = (assigned_value_type_ast, type(value_node).__name__)
+                    self.variable_assignments[var_name] = (
+                        assigned_value_type_ast,
+                        self._describe_collection_assignment(value_node),
+                    )
                 elif isinstance(value_node, ast.Name):
                     source_var_name = value_node.id
                     if source_var_name in self.variable_assignments:
@@ -932,11 +1033,9 @@ class ControlFlowGraph:
         """
         Tente de donner une description du type de l'itérable et de ses éléments.
         Retourne: (
-            iterable_kind_desc: "la séquence", "la collection", "la variable", "le résultat de func()"
-                (neutre pour éviter les problèmes de genre avec le nom de l'itérable)
+            iterable_kind_desc: information résiduelle sur la nature de l'itérable
             elements_type_desc_raw: "caractère", "nombre", "chaîne", "booléen", "variable", "mixte", "élément"
-            iterable_display_name: "'abc'", "ma_liste", "range(10)" 
-                (nom ou littéral pour affichage)
+            iterable_display_name: nom brut de variable ou littéral Python pour affichage
             article_indefini_element: "un", "une"
             article_defini_element: "le", "la", "l'"
             )
@@ -954,31 +1053,20 @@ class ControlFlowGraph:
 
         if isinstance(iterable_node, ast.Name):
             original_iterable_name_if_any = iterable_node.id
-            iterable_display_name = f"'{iterable_node.id}'" # Nom de la variable
+            iterable_display_name = iterable_node.id
             iterable_kind_desc = "la variable" # Plus spécifique
             if iterable_node.id in self.variable_assignments:
                 assigned_ast_type, assigned_value_or_desc = self.variable_assignments[iterable_node.id]
                 if assigned_ast_type == ast.Constant and isinstance(assigned_value_or_desc, str):
                     actual_node_to_inspect = ast.Constant(value=assigned_value_or_desc)
                     # iterable_kind_desc reste "la variable", mais on inspecte son contenu
-                elif assigned_ast_type == ast.List:
-                    actual_node_to_inspect = ast.List(elts=[], ctx=ast.Load()) # Simuler pour type
-                    iterable_kind_desc = "la variable (liste)"
-                    # Si assigned_value_or_desc est "liste de nombres", on peut l'utiliser pour elements_type_desc
-                    if isinstance(assigned_value_or_desc, str) and "liste de" in assigned_value_or_desc:
-                        if "nombres" in assigned_value_or_desc: elements_type_desc_raw = "nombre"
-                        elif "chaînes" in assigned_value_or_desc: elements_type_desc_raw = "chaîne"
-                elif assigned_ast_type == ast.Tuple:
-                    actual_node_to_inspect = ast.Tuple(elts=[], ctx=ast.Load())
-                    iterable_kind_desc = "la variable (tuple)"
-                # ... (ajouter Set, Dict si nécessaire pour variable_assignments) ...
+                elif assigned_ast_type in (ast.List, ast.Tuple, ast.Set):
+                    actual_node_to_inspect = None
+                    elements_type_desc_raw = self._get_element_type_from_assignment_description(assigned_value_or_desc)
                 elif assigned_ast_type == ast.Call and isinstance(assigned_value_or_desc, str): # ex: "résultat de len()"
-                    # elements_type_desc_raw reste "élément"
-                    # Déterminer les articles pour "élément"
-                    article_indefini_element = "un"; article_defini_element = "l'"
-                    iterable_kind_desc = f"la variable (contenu: {assigned_value_or_desc})"
-                    elements_type_desc_raw = "élément" # On ne sait pas plus
-                    return iterable_kind_desc, elements_type_desc_raw, iterable_display_name.strip("'"), article_indefini_element, article_defini_element
+                    actual_node_to_inspect = None
+                    if assigned_value_or_desc == "chaîne":
+                        elements_type_desc_raw = "caractère"
 
 
         # Analyse de actual_node_to_inspect (qui peut être l'original ou un reconstitué/simulé)
@@ -986,9 +1074,8 @@ class ControlFlowGraph:
             if isinstance(actual_node_to_inspect.value, str):
                 iterable_kind_desc = "la chaîne" if not original_iterable_name_if_any else iterable_kind_desc # Garder "la variable" si c'en était une
                 elements_type_desc_raw = "caractère" # forcément
-                # Mettre des guillemets simples autour du littéral chaîne pour l'affichage
-                escaped_value = actual_node_to_inspect.value.replace('"','#quot;')
-                iterable_display_name = f"{escaped_value}"
+                if not original_iterable_name_if_any:
+                    iterable_display_name = ast.unparse(actual_node_to_inspect).replace('"', '#quot;')
         
         elif isinstance(actual_node_to_inspect, (ast.List, ast.Tuple)):
             if isinstance(actual_node_to_inspect, ast.List):
@@ -997,28 +1084,7 @@ class ControlFlowGraph:
                 iterable_kind_desc = "le tuple" if not original_iterable_name_if_any else iterable_kind_desc
 
             if hasattr(actual_node_to_inspect, 'elts') and actual_node_to_inspect.elts:
-                element_types_seen = set()
-                for elt_node in actual_node_to_inspect.elts:
-                    current_el_type_str = "mixte" 
-                    if isinstance(elt_node, ast.Constant):
-                        if isinstance(elt_node.value, (int, float)): 
-                            current_el_type_str = "nombre"
-                        elif isinstance(elt_node.value, str): 
-                            # Différencier caractère de chaîne
-                            if len(elt_node.value) == 1:
-                                current_el_type_str = "caractère"
-                            else:
-                                current_el_type_str = "chaîne"
-                        elif isinstance(elt_node.value, bool): 
-                            current_el_type_str = "booléen"
-                    elif isinstance(elt_node, ast.Name): 
-                        current_el_type_str = "variable"
-                    element_types_seen.add(current_el_type_str)
-
-                if len(element_types_seen) == 1: 
-                    elements_type_desc_raw = element_types_seen.pop()
-                elif element_types_seen: 
-                    elements_type_desc_raw = "élément mixte"
+                elements_type_desc_raw = self._get_collection_element_type(actual_node_to_inspect)
                 # else: elements_type_desc reste "élément" (liste/tuple vide ou types non identifiables)
             else: # Liste ou tuple vide
                 elements_type_desc_raw = "élément"
@@ -1065,11 +1131,9 @@ class ControlFlowGraph:
         elif elements_type_desc_raw == "chaîne": article_indefini_element = "une"; article_defini_element = "la"
         elif elements_type_desc_raw == "booléen": article_indefini_element = "un"; article_defini_element = "le"
         elif elements_type_desc_raw == "clé": article_indefini_element = "une"; article_defini_element = "la"
-        # "variable", "élément mixte", "élément" restent avec "un" et "l'" par défaut.
+        elif elements_type_desc_raw == "variable": article_indefini_element = "une"; article_defini_element = "la"
+        # "élément mixte" et "élément" restent avec "un" et "l'" par défaut.
 
-        # Retourner iterable_display_name.strip("'") si c'était un nom de variable,
-        # mais pas si c'est un littéral chaîne qui doit garder ses guillemets.
-        # La logique actuelle pour iterable_display_name le gère déjà bien.
         return iterable_kind_desc, elements_type_desc_raw, iterable_display_name, \
                article_indefini_element, article_defini_element
 

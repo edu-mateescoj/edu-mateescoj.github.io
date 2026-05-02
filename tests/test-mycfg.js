@@ -42,6 +42,12 @@ json.dumps({
         return snapshot.edges.filter(([fromNode]) => fromNode === nodeId);
     }
 
+    function getNodeLabelsByType(snapshot, nodeType) {
+        return Object.entries(snapshot.node_labels)
+            .filter(([nodeId]) => snapshot.node_types[nodeId] === nodeType)
+            .map(([, nodeLabel]) => nodeLabel);
+    }
+
     describe('CFG MyCFG', () => {
         it('Relie break d\'un for a la sortie de boucle', async () => {
             const snapshot = await buildCfgSnapshot('for x in [1, 2]:\n    break\nprint("done")');
@@ -85,6 +91,60 @@ json.dumps({
 
             expect(outgoingTargets.includes(afterNodeId)).toBe(true);
             expect(outgoingTargets.includes(elseNodeId)).toBe(false);
+        });
+
+        it('Affiche un littéral de liste homogène sans le marquer mixte', async () => {
+            const snapshot = await buildCfgSnapshot('for item in [1, 2, 3]:\n    print(item)');
+            const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+
+            expect(decisionLabels.some(label => label.includes('[1, 2, 3]'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('nombre'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('élément mixte'))).toBe(false);
+        });
+
+        it('Reconnaît une liste littérale homogène avec entier négatif', async () => {
+            const snapshot = await buildCfgSnapshot('for item in [5, -3, 4, 4, 1]:\n    print(item)');
+            const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+
+            expect(decisionLabels.some(label => label.includes('[5, -3, 4, 4, 1]'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('nombre'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('élément mixte'))).toBe(false);
+        });
+
+        it('Affiche une variable de liste sans quotes ni préfixe verbeux', async () => {
+            const snapshot = await buildCfgSnapshot('values = [1, 2, 3]\nfor item in values:\n    print(item)');
+            const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+
+            expect(decisionLabels.some(label => label.includes('values'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes("'values'"))).toBe(false);
+            expect(decisionLabels.some(label => label.includes('variable (liste)'))).toBe(false);
+        });
+
+        it('Conserve le type nombre pour une variable de liste contenant un entier négatif', async () => {
+            const snapshot = await buildCfgSnapshot('values = [5, -3, 4, 4, 1]\nfor item in values:\n    print(item)');
+            const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+
+            expect(decisionLabels.some(label => label.includes('values'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('nombres'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('élément mixte'))).toBe(false);
+        });
+
+        it('Affiche une variable issue d\'un appel sans rappeler sa provenance', async () => {
+            const snapshot = await buildCfgSnapshot('values = compute()\nfor item in values:\n    print(item)');
+            const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+
+            expect(decisionLabels.some(label => label.includes('values'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('résultat d\'appel de fonction'))).toBe(false);
+            expect(decisionLabels.some(label => label.includes('contenu:'))).toBe(false);
+        });
+
+        it('Affiche un littéral chaîne avec sa syntaxe Python', async () => {
+            const snapshot = await buildCfgSnapshot('for ch in "abc":\n    print(ch)');
+            const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+
+            expect(decisionLabels.some(label => label.includes("'abc'"))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('la variable'))).toBe(false);
+            expect(decisionLabels.some(label => label.includes('contenu:'))).toBe(false);
         });
     });
 });
