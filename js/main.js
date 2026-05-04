@@ -148,6 +148,38 @@ function setEditorEditable(editable) {
     }
 }
 
+window.selectEditorSourceRange = function(sourceSpan) {
+    if (!codeEditorInstance || !sourceSpan) return;
+
+    const doc = codeEditorInstance.getDoc();
+    const lastLine = doc.lastLine();
+    const fallbackLine = Number.isInteger(sourceSpan.editorLine)
+        ? sourceSpan.editorLine
+        : (Number.isInteger(sourceSpan.lineno) ? Math.max(0, sourceSpan.lineno - 1) : 0);
+    const fallbackEndLine = Number.isInteger(sourceSpan.editorEndLine)
+        ? sourceSpan.editorEndLine
+        : (Number.isInteger(sourceSpan.end_lineno) ? Math.max(0, sourceSpan.end_lineno - 1) : fallbackLine);
+
+    const startLine = Math.max(0, Math.min(fallbackLine, lastLine));
+    const endLine = Math.max(startLine, Math.min(fallbackEndLine, lastLine));
+    const startColumn = Number.isInteger(sourceSpan.col_offset) ? Math.max(0, sourceSpan.col_offset) : 0;
+    const lineLength = (doc.getLine(endLine) || '').length;
+    const endColumn = Number.isInteger(sourceSpan.end_col_offset)
+        ? Math.max(startColumn, sourceSpan.end_col_offset)
+        : lineLength;
+    const from = { line: startLine, ch: startColumn };
+    const to = { line: endLine, ch: Math.max(0, Math.min(endColumn, lineLength)) };
+
+    doc.setSelection(from, to, { origin: '+flowchart' });
+    codeEditorInstance.scrollIntoView({ from, to }, 80);
+
+    const wrapper = codeEditorInstance.getWrapperElement();
+    const editorIsVisible = !!(wrapper && (wrapper.offsetParent || wrapper.getClientRects().length));
+    if (editorIsVisible) {
+        codeEditorInstance.focus();
+    }
+};
+
 // --- Mémoriser le code après génération ou chargement d'exemple ---
 function memorizeLoadedCode(code) {
     lastLoadedCode = code;

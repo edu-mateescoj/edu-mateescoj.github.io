@@ -193,6 +193,167 @@ var panZoomInstance = null;
 if (typeof window.panZoomInstance === 'undefined') {
     window.panZoomInstance = null;
 }
+window.__selectedFlowchartNodeId = window.__selectedFlowchartNodeId || null;
+
+function clearFlowchartNodeSelection(targetDiv) {
+    if (!targetDiv) return;
+
+    targetDiv.querySelectorAll('g.node.flowchart-node-selected').forEach(nodeGroup => {
+        nodeGroup.classList.remove('flowchart-node-selected');
+    });
+
+    window.__selectedFlowchartNodeId = null;
+}
+
+function applyFlowchartNodeSelection(targetDiv, nodeId) {
+    if (!targetDiv) return;
+
+    targetDiv.querySelectorAll('g.node.flowchart-node-selected').forEach(nodeGroup => {
+        nodeGroup.classList.remove('flowchart-node-selected');
+    });
+
+    if (!nodeId) {
+        window.__selectedFlowchartNodeId = null;
+        return;
+    }
+
+    const selectedNode = targetDiv.querySelector(`g.node[data-node-id="${nodeId}"]`);
+    if (!selectedNode) {
+        window.__selectedFlowchartNodeId = null;
+        return;
+    }
+
+    selectedNode.classList.add('flowchart-node-selected');
+    window.__selectedFlowchartNodeId = nodeId;
+}
+
+function normalizeRenderedNodeId(rawId) {
+    if (!rawId || typeof rawId !== 'string') return '';
+
+    let normalizedId = rawId;
+    if (normalizedId.startsWith('flowchart-')) {
+        normalizedId = normalizedId.slice('flowchart-'.length);
+    }
+
+    const lastDashIndex = normalizedId.lastIndexOf('-');
+    if (lastDashIndex > 0) {
+        const suffix = normalizedId.slice(lastDashIndex + 1);
+        if (/^\d+$/.test(suffix)) {
+            normalizedId = normalizedId.slice(0, lastDashIndex);
+        }
+    }
+
+    return normalizedId;
+}
+
+function resolveRenderedNodeId(nodeGroup, nodeSourceSpansEditor) {
+    if (!nodeGroup || !nodeSourceSpansEditor) return null;
+
+    const availableNodeIds = new Set(Object.keys(nodeSourceSpansEditor));
+    const candidates = [];
+    const rawId = nodeGroup.getAttribute('id');
+
+    if (rawId) {
+        candidates.push(rawId);
+        candidates.push(normalizeRenderedNodeId(rawId));
+    }
+
+    const titleElement = nodeGroup.querySelector('title');
+    if (titleElement && titleElement.textContent) {
+        candidates.push(titleElement.textContent.trim());
+    }
+
+    for (const candidate of candidates) {
+        if (candidate && availableNodeIds.has(candidate)) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function annotateFlowchartSvgNodes(targetDiv, svgElement) {
+    if (!targetDiv || !svgElement) return;
+
+    const nodeSourceSpansEditor = targetDiv.__nodeSourceSpansEditor || {};
+    const nodeGroups = Array.from(svgElement.querySelectorAll('g.node'));
+
+    nodeGroups.forEach(nodeGroup => {
+        nodeGroup.classList.remove('flowchart-node-selectable', 'flowchart-node-selected');
+        delete nodeGroup.dataset.nodeId;
+        delete nodeGroup.dataset.editorLine;
+        delete nodeGroup.dataset.editorEndLine;
+        delete nodeGroup.dataset.lineno;
+        delete nodeGroup.dataset.endLineno;
+        delete nodeGroup.dataset.colOffset;
+        delete nodeGroup.dataset.endColOffset;
+
+        const nodeId = resolveRenderedNodeId(nodeGroup, nodeSourceSpansEditor);
+        if (!nodeId) return;
+
+        const span = nodeSourceSpansEditor[nodeId];
+        nodeGroup.classList.add('flowchart-node-selectable');
+        nodeGroup.dataset.nodeId = nodeId;
+
+        if (Number.isInteger(span?.editorLine)) {
+            nodeGroup.dataset.editorLine = String(span.editorLine);
+        }
+        if (Number.isInteger(span?.editorEndLine)) {
+            nodeGroup.dataset.editorEndLine = String(span.editorEndLine);
+        }
+        if (Number.isInteger(span?.lineno)) {
+            nodeGroup.dataset.lineno = String(span.lineno);
+        }
+        if (Number.isInteger(span?.end_lineno)) {
+            nodeGroup.dataset.endLineno = String(span.end_lineno);
+        }
+        if (Number.isInteger(span?.col_offset)) {
+            nodeGroup.dataset.colOffset = String(span.col_offset);
+        }
+        if (Number.isInteger(span?.end_col_offset)) {
+            nodeGroup.dataset.endColOffset = String(span.end_col_offset);
+        }
+    });
+
+    if (window.__selectedFlowchartNodeId) {
+        applyFlowchartNodeSelection(targetDiv, window.__selectedFlowchartNodeId);
+    }
+}
+
+function bindFlowchartSelectionHandlers(targetDiv) {
+    if (!targetDiv) return;
+
+    if (typeof targetDiv.__flowchartClickHandler === 'function') {
+        targetDiv.removeEventListener('click', targetDiv.__flowchartClickHandler);
+    }
+
+    targetDiv.__flowchartClickHandler = function(event) {
+        const clickedNodeGroup = event.target.closest('g.node[data-node-id]');
+
+        if (clickedNodeGroup) {
+            const sourceSpan = {
+                editorLine: Number.parseInt(clickedNodeGroup.dataset.editorLine || '', 10),
+                editorEndLine: Number.parseInt(clickedNodeGroup.dataset.editorEndLine || '', 10),
+                lineno: Number.parseInt(clickedNodeGroup.dataset.lineno || '', 10),
+                end_lineno: Number.parseInt(clickedNodeGroup.dataset.endLineno || '', 10),
+                col_offset: Number.parseInt(clickedNodeGroup.dataset.colOffset || '', 10),
+                end_col_offset: Number.parseInt(clickedNodeGroup.dataset.endColOffset || '', 10),
+            };
+
+            applyFlowchartNodeSelection(targetDiv, clickedNodeGroup.dataset.nodeId);
+            if (typeof window.selectEditorSourceRange === 'function') {
+                window.selectEditorSourceRange(sourceSpan);
+            }
+            return;
+        }
+
+        if (event.target.closest('svg') || event.target === targetDiv) {
+            clearFlowchartNodeSelection(targetDiv);
+        }
+    };
+
+    targetDiv.addEventListener('click', targetDiv.__flowchartClickHandler);
+}
 
 function isFlowchartVisible() {
     const flowchart = document.getElementById('flowchart');
@@ -224,13 +385,18 @@ window.renderPendingFlowchart = function() {
  * @param {string} mermaidCode La chaîne de caractères Mermaid.
  * @param {string} targetDivId L'ID du div où afficher le diagramme.
  */
-async function displayFlowchart(mermaidCode, targetDivId) {
+async function displayFlowchart(mermaidCode, targetDivId, nodeSourceSpansEditor = null) {
     const targetDiv = document.getElementById(targetDivId);
     const zoomControls = document.getElementById('zoom-controls');
     
     if (!targetDiv) return;
 
     targetDiv.dataset.mermaidSource = mermaidCode || "";
+    if (nodeSourceSpansEditor && typeof nodeSourceSpansEditor === 'object') {
+        targetDiv.__nodeSourceSpansEditor = nodeSourceSpansEditor;
+    } else if (!targetDiv.__nodeSourceSpansEditor) {
+        targetDiv.__nodeSourceSpansEditor = {};
+    }
 
     if (!isFlowchartVisible()) {
         window.__pendingMermaidRender = true;
@@ -257,6 +423,8 @@ async function displayFlowchart(mermaidCode, targetDivId) {
     }
 
     if (!mermaidCode) {
+        targetDiv.__nodeSourceSpansEditor = {};
+        clearFlowchartNodeSelection(targetDiv);
         targetDiv.innerHTML = '<p class="text-center text-muted mt-3">Aucun diagramme à afficher.</p>';
         if (zoomControls) zoomControls.classList.remove('show');
         window.__mermaidRenderInProgress = false;
@@ -275,6 +443,8 @@ async function displayFlowchart(mermaidCode, targetDivId) {
         const svgElement = targetDiv.querySelector('svg');
 
         if (svgElement) {
+            annotateFlowchartSvgNodes(targetDiv, svgElement);
+            bindFlowchartSelectionHandlers(targetDiv);
             svgElement.removeAttribute('height');
             svgElement.removeAttribute('width');
             svgElement.removeAttribute('style');
@@ -410,7 +580,7 @@ async function triggerFlowchartUpdate() {
         // 2. On vérifie que l'objet "results" existe ET qu'il contient bien la propriété "mermaid"
         if (results && results.mermaid) {
             // 3. On passe uniquement la propriété "mermaid" à la fonction d'affichage
-            await displayFlowchart(results.mermaid, 'flowchart');
+            await displayFlowchart(results.mermaid, 'flowchart', results.nodeSourceSpansEditor || {});
         } else {
             // Gérer le cas où la génération a échoué et n'a rien retourné de valide
             await displayFlowchart("", 'flowchart');

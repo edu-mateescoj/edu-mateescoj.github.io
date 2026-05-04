@@ -14,6 +14,9 @@
     --syntax-builtin: #8be9fd;  /* Cyan */
     --cm-gutter-bg: #232530;
     --cm-line-number: #8b92b5;
+     --selection-accent: #ffb703;
+     --selection-fill: rgba(255, 183, 3, 0.18);
+     --editor-selection-bg: rgba(255, 183, 3, 0.34);
     
  /* Mermaid Spécifique (Mode Sombre - Haut Contraste) */
     --mermaid-node-bg: #282a36;     /* Fond des formes (sombre) */
@@ -38,6 +41,9 @@
     --syntax-builtin: #0056b3;  /* Bleu roi */
     --cm-gutter-bg: #f3f5f8;
     --cm-line-number: #6b7280;
+    --selection-accent: #0b57d0;
+    --selection-fill: rgba(11, 87, 208, 0.12);
+    --editor-selection-bg: rgba(11, 87, 208, 0.26);
 
 /* Mermaid Spécifique (Mode Clair - Haut Contraste) */
     --mermaid-node-bg: #ffffff;     /* Fond blanc */
@@ -107,6 +113,20 @@
     color: var(--cm-line-number) !important;
 }
 
+.CodeMirror-selected,
+.CodeMirror-focused .CodeMirror-selected {
+    background: var(--editor-selection-bg) !important;
+}
+
+.CodeMirror-line::selection,
+.CodeMirror-line > span::selection,
+.CodeMirror-line > span > span::selection,
+.CodeMirror-line::-moz-selection,
+.CodeMirror-line > span::-moz-selection,
+.CodeMirror-line > span > span::-moz-selection {
+    background: var(--editor-selection-bg) !important;
+}
+
 /* Surcharge des couleurs CodeMirror pour utiliser nos variables */
 .cm-s-dracula .cm-keyword, .cm-s-solarized .cm-keyword { color: var(--syntax-keyword) !important; font-weight: bold; }
 .cm-s-dracula .cm-variable, .cm-s-solarized .cm-variable { color: var(--syntax-variable) !important; }
@@ -144,6 +164,27 @@
     fill: var(--mermaid-node-bg) !important;
     stroke: var(--mermaid-node-border) !important;
     stroke-width: 2px !important;
+}
+
+#flowchart svg g.node.flowchart-node-selectable {
+    cursor: pointer;
+}
+
+#flowchart svg g.node.flowchart-node-selected rect,
+#flowchart svg g.node.flowchart-node-selected polygon,
+#flowchart svg g.node.flowchart-node-selected circle,
+#flowchart svg g.node.flowchart-node-selected path {
+    fill: var(--selection-fill) !important;
+    stroke: var(--selection-accent) !important;
+    stroke-width: 4px !important;
+}
+
+#flowchart svg g.node.flowchart-node-selected .label,
+#flowchart svg g.node.flowchart-node-selected .nodeLabel,
+#flowchart svg g.node.flowchart-node-selected foreignObject div {
+    color: var(--selection-accent) !important;
+    fill: var(--selection-accent) !important;
+    stroke: transparent !important;
 }
 
 /* Liens (Flèches) */
