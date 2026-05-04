@@ -111,7 +111,9 @@ async function generateFlowchartFromCode(pythonCode) {
                 mermaid: "",
                 canonicalCode: "",
                 ast_dump: "",
-                detectedTypes: {}
+                detectedTypes: {},
+                nodeSourceSpans: {},
+                nodeSourceSpansEditor: {}
             };
         }
 
@@ -136,6 +138,8 @@ try:
         output = {}
     if "detected_types" not in output:
         output["detected_types"] = {}
+    if "node_source_spans" not in output:
+        output["node_source_spans"] = {}
     if "ast_dump" not in output and cfg_instance.tree is not None:
         output["ast_dump"] = ast.dump(cfg_instance.tree)
 
@@ -146,6 +150,7 @@ except Exception as e:
         "canonical_code": "",
         "ast_dump": "",
         "detected_types": {},
+        "node_source_spans": {},
         "error": f"{type(e).__name__}: {str(e)}\\n{traceback.format_exc()}"
     }
 
@@ -154,12 +159,24 @@ json.dumps(output)
 
         const resultJson = await pyodide.runPythonAsync(pythonScript);
         const result = JSON.parse(resultJson);
+        const rawNodeSourceSpans = result.node_source_spans || {};
+        const nodeSourceSpansEditor = {};
+
+        Object.entries(rawNodeSourceSpans).forEach(([nodeId, span]) => {
+            nodeSourceSpansEditor[nodeId] = {
+                ...span,
+                editorLine: Number.isInteger(span?.lineno) ? Math.max(0, span.lineno - 1) : null,
+                editorEndLine: Number.isInteger(span?.end_lineno) ? Math.max(0, span.end_lineno - 1) : null
+            };
+        });
 
         return {
             mermaid: result.mermaid || "",
             canonicalCode: result.canonical_code || result.canonicalCode || "",
             ast_dump: result.ast_dump || "",
             detectedTypes: result.detected_types || {},
+            nodeSourceSpans: rawNodeSourceSpans,
+            nodeSourceSpansEditor,
             error: result.error || null
         };
 

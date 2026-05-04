@@ -1,5 +1,6 @@
 import ast
-from typing import List, Dict, Set, Tuple, Optional, Any
+import html
+from typing import List, Dict, Set, Tuple, Optional, Any, Sequence
 
 class ControlFlowGraph:
     def __init__(self, code: str):
@@ -19,6 +20,8 @@ class ControlFlowGraph:
         self.node_labels: Dict[str, str] = {} # Dictionnaire: node_id -> label
         self.terminal_nodes: Set[str] = set() # Ensemble des ID de nœuds qui terminent un flux (Return, Break, Continue)
         self.node_types: Dict[str, str] = {} # Dictionnaire: node_id -> type de nœud (Process, Decision, etc.)
+        self.node_source_spans: Dict[str, Dict[str, Optional[int]]] = {}
+        self.node_render_payloads: Dict[str, Dict[str, Any]] = {}
         
         # Pile pour gérer les portées des fonctions imbriquées.
         # Chaque élément est un Set d'IDs de nœuds pour cette portée de fonction.
@@ -57,6 +60,7 @@ class ControlFlowGraph:
             "canonical_code": canonical_code_string,
             "ast_dump": ast.dump(self.tree),
             "detected_types": detected_types,
+            "node_source_spans": self.node_source_spans,
             "error": None
         }
 
@@ -201,7 +205,14 @@ class ControlFlowGraph:
             self.main_flow_nodes.add(new_id)
         return new_id
 
-    def add_node(self, label: str, node_type: str = "Process") -> str:
+    def add_node(
+        self,
+        label: str,
+        node_type: str = "Process",
+        source_start_node: Optional[ast.AST] = None,
+        source_end_node: Optional[ast.AST] = None,
+        render_payload: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Ajoute un nouveau nœud au graphe."""
         node_id = self.get_node_id() # get_node_id gère l'ajout aux ensembles pour les sous-graphes
         
@@ -214,6 +225,17 @@ class ControlFlowGraph:
         self.nodes.append((node_id, label))
         self.node_labels[node_id] = label
         self.node_types[node_id] = node_type
+        if source_start_node or source_end_node:
+            start_node = source_start_node or source_end_node
+            end_node = source_end_node or source_start_node
+            self.node_source_spans[node_id] = {
+                "lineno": getattr(start_node, "lineno", None),
+                "end_lineno": getattr(end_node, "end_lineno", getattr(end_node, "lineno", None)),
+                "col_offset": getattr(start_node, "col_offset", None),
+                "end_col_offset": getattr(end_node, "end_col_offset", getattr(end_node, "col_offset", None)),
+            }
+        if render_payload:
+            self.node_render_payloads[node_id] = render_payload
         return node_id
 
     def add_edge(self, from_node: str, to_node: str, label: str = ""):
@@ -241,7 +263,7 @@ class ControlFlowGraph:
         """Vérifie si un nœud AST est un nœud qui termine le flux normal (Return, Break, Continue)."""
         return isinstance(node, (ast.Return, ast.Break, ast.Continue))
 
-    def visit_body(self, body: List[ast.AST], entry_node_ids: List[str]) -> List[str]:
+    def visit_body(self, body: Sequence[ast.stmt], entry_node_ids: List[str]) -> List[str]:
         """
         Visite une séquence d'instructions (un "corps").
         Gère la création de jonctions si nécessaire entre les instructions.
@@ -249,8 +271,10 @@ class ControlFlowGraph:
         """
         active_ids_for_current_statement = list(set(entry_node_ids))
 
-        for i, stmt in enumerate(body):
-            if not active_ids_for_current_statement: 
+        i = 0
+        while i < len(body):
+            stmt = body[i]
+            if not active_ids_for_current_statement:
                 # Plus de chemins actifs à traiter dans ce corps.
                 break
             
@@ -263,12 +287,29 @@ class ControlFlowGraph:
                  active_ids_for_current_statement = [] 
                  break
 
+            assign_block: List[ast.stmt] = []
+            if isinstance(stmt, (ast.Assign, ast.AugAssign)):
+                assign_block.append(stmt)
+                next_index = i + 1
+                while next_index < len(body):
+                    next_stmt = body[next_index]
+                    if not isinstance(next_stmt, (ast.Assign, ast.AugAssign)):
+                        break
+                    assign_block.append(next_stmt)
+                    next_index += 1
+
             # Collecter les points de sortie de l'instruction courante, pour tous les chemins d'entrée.
             exits_from_current_stmt_all_paths: List[str] = []
             for parent_id in current_stmt_entry_points:
-                # visit() retourne les ID des nœuds de sortie de stmt pour ce parent_id.
-                exit_nodes_from_stmt_path = self.visit(stmt, parent_id)
+                if len(assign_block) > 1:
+                    exit_nodes_from_stmt_path = self._visit_assignment_block(assign_block, parent_id)
+                else:
+                    # visit() retourne les ID des nœuds de sortie de stmt pour ce parent_id.
+                    exit_nodes_from_stmt_path = self.visit(stmt, parent_id)
                 exits_from_current_stmt_all_paths.extend(exit_nodes_from_stmt_path)
+
+            if len(assign_block) > 1:
+                i += len(assign_block) - 1
             
             # Les points de sortie de l'instruction courante deviennent les points d'entrée potentiels pour la suivante.
             active_ids_for_current_statement = list(set(exits_from_current_stmt_all_paths))
@@ -290,6 +331,8 @@ class ControlFlowGraph:
                 # On conserve les points terminaux s'il y en avait.
                 terminal_active_ids = [pid for pid in active_ids_for_current_statement if pid in self.terminal_nodes]
                 active_ids_for_current_statement = [junction_id] + terminal_active_ids
+
+            i += 1
         
         # Retourne tous les points de sortie actifs (terminaux ou non) du corps.
         return active_ids_for_current_statement
@@ -411,7 +454,7 @@ class ControlFlowGraph:
     def visit_If(self, node: ast.If, parent_id: str) -> List[str]:
         """Visite une instruction 'if' AST."""
         condition_text = ast.unparse(node.test).replace('"', '"') # Remplacer les guillemets pour Mermaid.
-        if_decision_id = self.add_node(f"{condition_text}", node_type="Decision")
+        if_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node)
         self.add_edge(parent_id, if_decision_id)
 
         # Points de sortie finaux de la structure If globale.
@@ -500,7 +543,7 @@ class ControlFlowGraph:
         if isinstance(iterable_node, (ast.Constant, ast.List, ast.Tuple, ast.Set)): # Littéral itérable
             if isinstance(iterable_node, ast.Constant) and iterable_node.value: # Chaîne non vide
                 skip_first_check = True
-            elif hasattr(iterable_node, 'elts') and iterable_node.elts: # Liste/Tuple non vide
+            elif isinstance(iterable_node, (ast.List, ast.Tuple, ast.Set)) and iterable_node.elts: # Liste/Tuple non vide
                 skip_first_check = True
         elif isinstance(iterable_node, ast.Call) and \
              isinstance(iterable_node.func, ast.Name) and \
@@ -524,7 +567,7 @@ class ControlFlowGraph:
                 f"{iterable_display_name}<br>"
                 f"contient {self._format_entry_elements_phrase(elements_type_desc_raw)} ?"
             )
-            entry_decision_id = self.add_node(entry_decision_label, node_type="Decision")
+            entry_decision_id = self.add_node(entry_decision_label, node_type="Decision", source_start_node=node)
             self.add_edge(parent_id, entry_decision_id)
             current_parent_for_loop_structure = entry_decision_id
         
@@ -536,7 +579,7 @@ class ControlFlowGraph:
             init_var_label = f"{iterator_variable_str} ← La première {elements_type_desc_raw}<br>de {iterable_display_name}"
         else: # "des" ou autre
             init_var_label = f"{iterator_variable_str} ← Les premier(es) {elements_type_desc_raw}<br>de {iterable_display_name}"
-        init_var_id = self.add_node(init_var_label, node_type="Process")
+        init_var_id = self.add_node(init_var_label, node_type="Process", source_start_node=node)
 
         if entry_decision_id: # Si la première décision existe (on ne l'a pas sautée)
             self.add_edge(entry_decision_id, init_var_id, "Oui")
@@ -545,7 +588,7 @@ class ControlFlowGraph:
 
         # Nœuds pour le re-test et la mise à jour de l'itérateur
         retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans {iterable_display_name} ?"
-        retest_decision_id = self.add_node(retest_decision_label, node_type="Decision")
+        retest_decision_id = self.add_node(retest_decision_label, node_type="Decision", source_start_node=node)
         
         next_element_phrase = self._join_article_and_noun(article_defini_element, elements_type_desc_raw)
         if article_indefini_element == "un":
@@ -554,7 +597,7 @@ class ControlFlowGraph:
             next_var_label = f"{iterator_variable_str} ← {next_element_phrase} suivante<br>de {iterable_display_name}"
         else: # "des" ou autre
             next_var_label = f"{iterator_variable_str} ← {next_element_phrase}s suivants<br>de {iterable_display_name}"
-        next_var_id = self.add_node(next_var_label, node_type="Process")
+        next_var_id = self.add_node(next_var_label, node_type="Process", source_start_node=node)
 
         # --- Connexions et Flux ---
         loop_exit_id = self.add_node(".", node_type="Junction")
@@ -659,8 +702,21 @@ class ControlFlowGraph:
     
     def visit_While(self, node: ast.While, parent_id: str) -> List[str]: 
         """Visite une boucle 'while' AST."""
-        condition_text = ast.unparse(node.test).replace('"', '"')
-        while_decision_id = self.add_node(f"{condition_text}", node_type="Decision")
+        if isinstance(node.test, ast.BoolOp) and len(node.test.values) > 1:
+            leading_values = node.test.values[:-1]
+            trailing_value = node.test.values[-1]
+            if len(leading_values) == 1:
+                first_line = ast.unparse(leading_values[0])
+                if isinstance(leading_values[0], ast.BoolOp):
+                    first_line = f"({first_line})"
+            else:
+                first_line = ast.unparse(ast.BoolOp(op=node.test.op, values=leading_values))
+            final_operator = "and" if isinstance(node.test.op, ast.And) else "or"
+            condition_text = f"{first_line}\n{final_operator} {ast.unparse(trailing_value)}"
+        else:
+            condition_text = ast.unparse(node.test)
+        condition_text = condition_text.replace('"', '"')
+        while_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node)
         self.add_edge(parent_id, while_decision_id)
 
         loop_exit_id = self.add_node(".", node_type="Junction")
@@ -715,14 +771,14 @@ class ControlFlowGraph:
     def visit_Return(self, node: ast.Return, parent_id: str) -> List[str]:
         """Visite une instruction 'return' AST."""
         value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
-        return_node_id = self.add_node(f"Return {value_text}", node_type="Return")
+        return_node_id = self.add_node(f"Return {value_text}", node_type="Return", source_start_node=node)
         self.add_edge(parent_id, return_node_id)
         # visit() marquera return_node_id comme terminal et retournera [].
         return [return_node_id] 
 
     def visit_Break(self, node: ast.Break, parent_id: str) -> List[str]: 
         """Visite une instruction 'break' AST."""
-        break_node_id = self.add_node("Break", node_type="Jump")
+        break_node_id = self.add_node("Break", node_type="Jump", source_start_node=node)
         self.add_edge(parent_id, break_node_id)
         if self.loop_stack:
             _, loop_exit_target, _ = self.loop_stack[-1]
@@ -731,7 +787,7 @@ class ControlFlowGraph:
 
     def visit_Continue(self, node: ast.Continue, parent_id: str) -> List[str]: 
         """Visite une instruction 'continue' AST."""
-        continue_node_id = self.add_node("Continue", node_type="Jump")
+        continue_node_id = self.add_node("Continue", node_type="Jump", source_start_node=node)
         self.add_edge(parent_id, continue_node_id)
         if self.loop_stack:
             loop_continue_target, _, _ = self.loop_stack[-1]
@@ -739,7 +795,7 @@ class ControlFlowGraph:
         # else: # 'continue' en dehors d'une boucle (erreur Python).
         return [continue_node_id] # visit() le marquera comme terminal.
 
-    def generic_visit(self, node: ast.AST, parent_id: str) -> List[str]:
+    def generic_visit(self, node: ast.AST, parent_id: Optional[str]) -> List[str]:
         print(f"DEBUG: generic_visit appelée pour {type(node).__name__} (parent: {parent_id})")
         """Visiteur par défaut pour les nœuds AST non gérés spécifiquement."""
         try:
@@ -754,14 +810,14 @@ class ControlFlowGraph:
             if len(label_text) > max_label_length: 
                 label_text = label_text[:max_label_length-3] + "..."
             
-            new_node_id = self.add_node(label_text, node_type=node_type)
+            new_node_id = self.add_node(label_text, node_type=node_type, source_start_node=node)
             if parent_id: # Connecter au parent si un parent existe.
                 self.add_edge(parent_id, new_node_id)
             return [new_node_id]
         except Exception: # Si unparse échoue.
             label_text = f"Noeud AST: {type(node).__name__}"
             # print(f"Warning: Impossible de 'unparse' le noeud {label_text}. Erreur: {e}")
-            new_node_id = self.add_node(label_text, node_type="Process")
+            new_node_id = self.add_node(label_text, node_type="Process", source_start_node=node)
             if parent_id: 
                 self.add_edge(parent_id, new_node_id)
             return [new_node_id]
@@ -864,25 +920,50 @@ class ControlFlowGraph:
         """Retourne une forme courte pour les questions d'entrée de boucle."""
         return f"des {self._get_plural_element_type(element_type)}"
 
-    def visit_Assign(self, node: ast.Assign, parent_id: str) -> List[str]:
-        """Visite une instruction d'assignation AST."""
-        targets_str = ", ".join([ast.unparse(t).replace('"', '"') for t in node.targets])
-        value_str = ast.unparse(node.value).replace('"', '"')
-        
-        label_text = f"{targets_str} = {value_str}"
-        node_type = "Process"
+    def _get_augassign_operator_text(self, operator: ast.operator) -> str:
+        """Retourne le texte de l'opérateur d'une affectation augmentée."""
+        operator_map = {
+            ast.Add: "+=",
+            ast.Sub: "-=",
+            ast.Mult: "*=",
+            ast.Div: "/=",
+            ast.FloorDiv: "//=",
+            ast.Mod: "%=",
+            ast.Pow: "**=",
+            ast.BitAnd: "&=",
+            ast.BitOr: "|=",
+            ast.BitXor: "^=",
+            ast.LShift: "<<=",
+            ast.RShift: ">>=",
+            ast.MatMult: "@=",
+        }
+        return operator_map.get(type(operator), f"{ast.unparse(operator)}=")
 
-        value_node = node.value
-        value_str_for_label = ast.unparse(value_node).replace('"', '"') if value_node else ""
-        
-        # Tenter de stocker des informations sur l'affectation pour une inférence de type ultérieure
-        for target_node in node.targets:
-            if isinstance(target_node, ast.Name): # Cible d'affectation simple (variable).
+    def _get_assignment_display_parts(self, node: ast.stmt) -> Dict[str, str]:
+        """Construit les parties d'affichage d'une instruction d'affectation."""
+        if isinstance(node, ast.Assign):
+            target_text = ", ".join([ast.unparse(target).replace('"', '"') for target in node.targets])
+            operator_text = "←"
+            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
+        elif isinstance(node, ast.AugAssign):
+            target_text = ast.unparse(node.target).replace('"', '"')
+            operator_text = self._get_augassign_operator_text(node.op)
+            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
+        else:
+            raise TypeError(f"Instruction d'affectation non supportée: {type(node).__name__}")
+
+        return {
+            "target": target_text,
+            "operator": operator_text,
+            "value": value_text,
+        }
+
+    def _store_assignment_metadata(self, target_nodes: Sequence[ast.expr], value_node: ast.AST):
+        """Mémorise les types simples rencontrés lors des affectations."""
+        for target_node in target_nodes:
+            if isinstance(target_node, ast.Name):
                 var_name = target_node.id
-                assigned_value_type_ast = type(value_node) # Le type du noeud AST (ast.Constant, ast.List, etc.)
-                # On stocke le type du noeud AST et une représentation de la valeur
-                # Pour les constantes, on peut stocker la valeur réelle
-                # Pour les listes/tuples, on pourrait stocker une description ou les types des éléments
+                assigned_value_type_ast = type(value_node)
                 if isinstance(value_node, ast.Constant):
                     self.variable_assignments[var_name] = (assigned_value_type_ast, value_node.value)
                 elif isinstance(value_node, (ast.List, ast.Tuple, ast.Set)):
@@ -893,19 +974,14 @@ class ControlFlowGraph:
                 elif isinstance(value_node, ast.Name):
                     source_var_name = value_node.id
                     if source_var_name in self.variable_assignments:
-                        # Propager l'information de la variable source
                         self.variable_assignments[var_name] = self.variable_assignments[source_var_name]
                     else:
-                        # On ne connaît pas le type de la variable source, donc on ne stocke rien de précis pour var_name
-                        self.variable_assignments[var_name] = (ast.Name, "variable (type inconnu)") # Ou autre??
+                        self.variable_assignments[var_name] = (ast.Name, "variable (type inconnu)")
                 elif isinstance(value_node, ast.Call):
-                    # Tenter d'inférer le type de retour si c'est une fonction connue
-                    func_name_str = ast.unparse(value_node.func) # Peut être complexe (ex: obj.method)
-                    # Heuristique simple pour les builtins courants
                     if isinstance(value_node.func, ast.Name):
                         called_func_name = value_node.func.id
-                        if called_func_name in ['len','int']:
-                            self.variable_assignments[var_name] = (ast.Call, "nombre (entier)") # len retourne un int
+                        if called_func_name in ['len', 'int']:
+                            self.variable_assignments[var_name] = (ast.Call, "nombre (entier)")
                         elif called_func_name in ['str', 'upper', 'lower', 'chr', 'type']:
                             self.variable_assignments[var_name] = (ast.Call, "chaîne")
                         elif called_func_name in ['sum', 'min', 'max', 'abs', 'ord', 'float', 'pow']:
@@ -913,28 +989,63 @@ class ControlFlowGraph:
                         else:
                             self.variable_assignments[var_name] = (ast.Call, f"résultat de {called_func_name}()")
                     else:
-                        self.variable_assignments[var_name] = (ast.Call, f"résultat d'appel de fonction")
+                        self.variable_assignments[var_name] = (ast.Call, "résultat d'appel de fonction")
 
-
-        # --- Création du noeud pour l'instruction d'assignation elle-même ---
-        targets_str_for_label = ", ".join([ast.unparse(t).replace('"', '"') for t in node.targets])
-        label_text = f"{targets_str_for_label} = {value_str_for_label}"
-        node_type_for_assign_node = "Process" # Type par défaut pour les assignations.
-
+    def _format_assignment_statement_label(self, node: ast.stmt) -> str:
+        """Formate une affectation simple ou augmentée pour le rendu Mermaid."""
+        assignment_parts = self._get_assignment_display_parts(node)
+        label_text = f"{assignment_parts['target']} {assignment_parts['operator']} {assignment_parts['value']}"
 
         max_label_length = 60
         if len(label_text) > max_label_length:
-             # Tenter de raccourcir la partie droite (valeur) en premier.
-             available_len_for_value = max_label_length - len(targets_str) - 6 # Pour " = ..."
-             if available_len_for_value > 10 : # Assez de place pour une valeur raccourcie significative.
-                 short_value = value_str[:available_len_for_value] + "..." if len(value_str) > available_len_for_value else value_str
-                 label_text = f"{targets_str} = {short_value}"
-             else: # Sinon, raccourcir le tout.
-                 label_text = label_text[:max_label_length-3] + "..."
-        
-        assign_node_id = self.add_node(label_text, node_type=node_type_for_assign_node)
+            available_len_for_value = max_label_length - len(assignment_parts['target']) - len(assignment_parts['operator']) - 3
+            if available_len_for_value > 10:
+                value_text = assignment_parts['value']
+                short_value = value_text[:available_len_for_value] + "..." if len(value_text) > available_len_for_value else value_text
+                label_text = f"{assignment_parts['target']} {assignment_parts['operator']} {short_value}"
+            else:
+                label_text = label_text[:max_label_length - 3] + "..."
+
+        return label_text
+
+    def _visit_assignment_block(self, assign_nodes: Sequence[ast.stmt], parent_id: str) -> List[str]:
+        """Fusionne une suite d'affectations simples et augmentées en un rectangle multiline."""
+        label_lines: List[str] = []
+        render_rows: List[Dict[str, str]] = []
+        for assign_node in assign_nodes:
+            if isinstance(assign_node, ast.Assign):
+                self._store_assignment_metadata(assign_node.targets, assign_node.value)
+            label_lines.append(self._format_assignment_statement_label(assign_node))
+            render_rows.append(self._get_assignment_display_parts(assign_node))
+
+        assign_block_id = self.add_node(
+            "\n".join(label_lines),
+            node_type="AssignmentBlock",
+            source_start_node=assign_nodes[0],
+            source_end_node=assign_nodes[-1],
+            render_payload={
+                "kind": "assignment_block",
+                "rows": render_rows,
+            },
+        )
+        self.add_edge(parent_id, assign_block_id)
+        return [assign_block_id]
+
+    def visit_Assign(self, node: ast.Assign, parent_id: str) -> List[str]:
+        """Visite une instruction d'assignation AST."""
+        value_node = node.value
+        self._store_assignment_metadata(node.targets, value_node)
+        label_text = self._format_assignment_statement_label(node)
+        assign_node_id = self.add_node(label_text, node_type="Process", source_start_node=node)
         self.add_edge(parent_id, assign_node_id)
         return [assign_node_id]
+
+    def visit_AugAssign(self, node: ast.AugAssign, parent_id: str) -> List[str]:
+        """Visite une instruction d'assignation augmentée AST."""
+        label_text = self._format_assignment_statement_label(node)
+        augassign_node_id = self.add_node(label_text, node_type="Process", source_start_node=node)
+        self.add_edge(parent_id, augassign_node_id)
+        return [augassign_node_id]
 
     def visit_Expr(self, node: ast.Expr, parent_id: str) -> List[str]:
         """Visite une instruction d'expression AST (souvent un appel de fonction autonome)."""
@@ -972,12 +1083,12 @@ class ControlFlowGraph:
         else: # Pour les autres appels, on peut ajouter "Appel:" pour les distinguer.
             label_text = f"Appel: {label_text}"
 
-        call_node_id = self.add_node(label_text, node_type=node_type)
+        call_node_id = self.add_node(label_text, node_type=node_type, source_start_node=node)
         self.add_edge(parent_id, call_node_id)
         return [call_node_id]
 
 
-    def _evaluate_range_to_list_str(self, range_args_nodes: List[ast.AST]) -> Optional[str]:
+    def _evaluate_range_to_list_str(self, range_args_nodes: Sequence[ast.expr]) -> Optional[str]:
         """
         Tente d'évaluer les arguments d'un ast.Call à range() et de retourner
         la liste de nombres explicite sous forme de chaîne, ou None si l'évaluation échoue.
@@ -1190,6 +1301,29 @@ class ControlFlowGraph:
         
         return simplified_nodes_tuples, simplified_edges
 
+    def _format_mermaid_label(self, node_id: str, label_text: str, node_type: str) -> str:
+        """Formate le label Mermaid d'un noeud, avec rendu HTML pour les blocs d'affectation."""
+        if node_type == "AssignmentBlock":
+            render_payload = self.node_render_payloads.get(node_id, {})
+            rows = render_payload.get("rows", [])
+            if rows:
+                rendered_rows: List[str] = []
+                for row in rows:
+                    rendered_rows.append(
+                        "<tr>"
+                        f"<td style='text-align: right; padding-right: 0.45em;'>{html.escape(row['target'], quote=False)}</td>"
+                        f"<td style='text-align: center; padding: 0 0.15em; min-width: 2.4em;'>{html.escape(row['operator'], quote=False)}</td>"
+                        f"<td style='text-align: left; padding-left: 0.45em;'>{html.escape(row['value'], quote=False)}</td>"
+                        "</tr>"
+                    )
+                return (
+                    "<table style='font-family: Consolas, &quot;Courier New&quot;, monospace; border-collapse: collapse; margin: 0 auto;'>"
+                    + "".join(rendered_rows)
+                    + "</table>"
+                )
+
+        return label_text.replace('"', '#quot;').replace('\n', '<br/>')
+
     def to_mermaid(self) -> str:
         """Génère la représentation du graphe en syntaxe Mermaid, avec sous-graphes."""
         
@@ -1207,6 +1341,7 @@ class ControlFlowGraph:
             "    classDef StartEnd fill:#999,stroke:#fff,stroke-width:2px;",
             "    classDef Decision fill:#999,stroke:#fff,stroke-width:2px;",
             "    classDef Process fill:#999,stroke:#fff,stroke-width:2px;",
+            "    classDef AssignmentBlock fill:#999,stroke:#fff,stroke-width:2px;",
             "    classDef IoOperation fill:#999,stroke:#fff,stroke-width:2px;",
             "    classDef Junction fill:#999,stroke:#fff,stroke-width:1px;", # Cercle pour jonction.
             "    classDef Return fill:#999,stroke:#fff,stroke-width:2px;",
@@ -1218,8 +1353,8 @@ class ControlFlowGraph:
             mermaid_lines.append("    subgraph Flux Principal")
             for node_id, label_text in display_nodes_tuples:
                 if node_id in self.main_flow_nodes:
-                    safe_label = label_text.replace('"', '#quot;').replace('\n', '<br/>')
                     node_type = self.node_types.get(node_id, "Process")
+                    safe_label = self._format_mermaid_label(node_id, label_text, node_type)
                     shape_open, shape_close = self._get_mermaid_node_shape(node_type, safe_label)
                     mermaid_lines.append(f'        {node_id}{shape_open}"{safe_label}"{shape_close}')
             mermaid_lines.append("    end")
@@ -1230,8 +1365,8 @@ class ControlFlowGraph:
                 mermaid_lines.append(f'    subgraph Fonction {func_name}')
                 for node_id, label_text in display_nodes_tuples:
                     if node_id in node_ids_in_func:
-                        safe_label = label_text.replace('"', '#quot;').replace('\n', '<br/>')
                         node_type = self.node_types.get(node_id, "Process")
+                        safe_label = self._format_mermaid_label(node_id, label_text, node_type)
                         shape_open, shape_close = self._get_mermaid_node_shape(node_type, safe_label)
                         mermaid_lines.append(f'        {node_id}{shape_open}"{safe_label}"{shape_close}')
                 mermaid_lines.append("    end")

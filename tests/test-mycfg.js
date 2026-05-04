@@ -17,6 +17,7 @@ json.dumps({
     "edges": sorted(list(cfg.edges)),
     "node_labels": cfg.node_labels,
     "node_types": cfg.node_types,
+    "node_source_spans": cfg.node_source_spans,
 })
             `);
 
@@ -48,6 +49,10 @@ json.dumps({
             .map(([, nodeLabel]) => nodeLabel);
     }
 
+    function getNodeSourceSpan(snapshot, nodeId) {
+        return snapshot.node_source_spans[nodeId] || null;
+    }
+
     describe('CFG MyCFG', () => {
         it('Relie break d\'un for a la sortie de boucle', async () => {
             const snapshot = await buildCfgSnapshot('for x in [1, 2]:\n    break\nprint("done")');
@@ -73,6 +78,17 @@ json.dumps({
             const breakTargetId = breakEdges[0][1];
             expect(snapshot.node_types[breakTargetId]).toBe('Junction');
             expect(getOutgoingEdges(snapshot, breakTargetId).some(([, toNode]) => toNode === afterNodeId)).toBe(true);
+        });
+
+        it('Découpe un while booléen sur la conjonction finale', async () => {
+            const snapshot = await buildCfgSnapshot(
+                'while ((count > 0) or has_value) and z > 0:\n    count -= 1\nprint("after")'
+            );
+            const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+
+            expect(
+                decisionLabels.some(label => label.includes('(count > 0 or has_value)\nand z > 0'))
+            ).toBe(true);
         });
 
         it('Fait contourner else a un break de for', async () => {
@@ -145,6 +161,53 @@ json.dumps({
             expect(decisionLabels.some(label => label.includes("'abc'"))).toBe(true);
             expect(decisionLabels.some(label => label.includes('la variable'))).toBe(false);
             expect(decisionLabels.some(label => label.includes('contenu:'))).toBe(false);
+        });
+
+        it('Fusionne des affectations simples consécutives dans un seul rectangle', async () => {
+            const snapshot = await buildCfgSnapshot('x = 1\ny = 2\nz = 3\nprint(z)');
+            const mergedEntry = Object.entries(snapshot.node_labels).find(([, nodeLabel]) =>
+                nodeLabel === 'x ← 1\ny ← 2\nz ← 3'
+            );
+
+            expect(mergedEntry).toBeDefined();
+            expect(snapshot.node_types[mergedEntry[0]]).toBe('AssignmentBlock');
+            expect(
+                Object.values(snapshot.node_labels).filter(nodeLabel => nodeLabel.includes('←')).length
+            ).toBe(1);
+
+            const mergedNodeId = mergedEntry[0];
+            const printNodeId = findNodeIdByLabelFragment(snapshot, 'print(z)');
+            expect(getOutgoingEdges(snapshot, mergedNodeId).some(([, toNode]) => toNode === printNodeId)).toBe(true);
+        });
+
+        it('Fusionne aussi les affectations augmentées dans le bloc unifié', async () => {
+            const snapshot = await buildCfgSnapshot('count = 3\ncount += 1\ncount -= 2\nprint(count)');
+            const mergedEntry = Object.entries(snapshot.node_labels).find(([, nodeLabel]) =>
+                nodeLabel === 'count ← 3\ncount += 1\ncount -= 2'
+            );
+
+            expect(mergedEntry).toBeDefined();
+            expect(snapshot.node_types[mergedEntry[0]]).toBe('AssignmentBlock');
+            expect(
+                Object.values(snapshot.node_labels).some(nodeLabel => nodeLabel === 'count += 1')
+            ).toBe(false);
+            expect(
+                Object.values(snapshot.node_labels).some(nodeLabel => nodeLabel === 'count -= 2')
+            ).toBe(false);
+        });
+
+        it('Expose des plages source AST pour les noeuds du CFG', async () => {
+            const snapshot = await buildCfgSnapshot('x = 1\ny = 2\nwhile x > 0:\n    x -= 1');
+            const assignBlockNodeId = findNodeIdByLabelFragment(snapshot, 'x ← 1\ny ← 2');
+            const whileNodeId = findNodeIdByLabelFragment(snapshot, 'x > 0');
+            const assignBlockSpan = getNodeSourceSpan(snapshot, assignBlockNodeId);
+            const whileSpan = getNodeSourceSpan(snapshot, whileNodeId);
+
+            expect(assignBlockSpan).toBeDefined();
+            expect(assignBlockSpan.lineno).toBe(1);
+            expect(assignBlockSpan.end_lineno).toBe(2);
+            expect(whileSpan).toBeDefined();
+            expect(whileSpan.lineno).toBe(3);
         });
     });
 });
