@@ -28,3 +28,15 @@
 - Si l'on veut cliquer un noeud de logigramme pour viser l'editeur, il faut utiliser `nodeSourceSpansEditor` cote JS, pas `nodeSourceSpans` directement.
 - Si l'on veut exporter un SVG interactif ou enrichi, il faut injecter les attributs dans le SVG juste apres `mermaid.run(...)`, puis laisser les fonctions d'export cloner ce SVG deja enrichi.
 - Le rendu HTML des blocs d'affectations unifies repose deja sur `htmlLabels: true`; cette capacite sera egalement utile pour de futures metadonnees visuelles, mais elle ne remplace pas un enrichissement du vrai DOM SVG pour l'interactivite.
+
+## Choix d'implémentation (au 04.05.26 à 22:30)
+
+- `MyCFG.py` enregistre la plage source d'un noeud soit a partir d'un noeud AST, soit a partir d'un span explicite calcule pour le CFG.
+- Les noeuds `Decision` de `if` et `while` sont maintenant ancres sur `node.test`, donc sur l'expression effectivement evaluee.
+- Les noeuds synthétiques de controle d'un `for` sont ancres sur la ligne d'en-tete `for ... in ...`, y compris l'initialisation de l'iterateur, afin de rendre visible que ces etapes appartiennent a une meme ligne de controle en Python meme si elles sont decomposées dans le CFG.
+- Le noeud `Start fonction` est ancre sur la ligne `def ...`, tandis que `End fonction` ne porte pas de plage source.
+- Les blocs d'affectations unifies restent ancres sur un span agrégé, mais uniquement quand les statements sont reellement contigus dans le code source. Un `def` top-level agit donc comme separateur et empeche toute fusion abusive entre affectations placees avant et apres lui.
+- Cote JS, `flowchart-generator.js` continue de normaliser les spans pour l'editeur, et `main.js` applique ou efface ensuite la selection CodeMirror en miroir de la selection du diagramme.
+
+Résultat : Le comportement de selection suit maintenant la semantique pedagogique du noeud CFG plutot que la seule portee syntaxique du statement AST. Pour un `if` ou un `while`, le clic fait ressortir la condition evaluee; pour un `for`, il fait ressortir la ligne d'en-tete qui porte textuellement le mecanisme de controle; pour `Start fonction`, il fait ressortir la declaration `def`. Ce choix sert mieux le tracage du controle, limite la surcharge cognitive, et evite de laisser croire qu'un losange de decision « possede » tout un bloc de texte au moment ou il est clique. La desélection suit la meme logique: si le noeud du diagramme n'est plus selectionne, l'editeur ne doit pas conserver de trace visuelle residuelle, afin d'eviter une ambiguite tardive pour les eleves.
+

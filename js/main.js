@@ -180,6 +180,14 @@ window.selectEditorSourceRange = function(sourceSpan) {
     }
 };
 
+window.clearEditorSourceSelection = function() {
+    if (!codeEditorInstance) return;
+
+    const doc = codeEditorInstance.getDoc();
+    const cursor = doc.getCursor('from');
+    doc.setSelection(cursor, cursor, { origin: '+flowchart' });
+};
+
 // --- Mémoriser le code après génération ou chargement d'exemple ---
 function memorizeLoadedCode(code) {
     lastLoadedCode = code;

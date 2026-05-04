@@ -209,5 +209,76 @@ json.dumps({
             expect(whileSpan).toBeDefined();
             expect(whileSpan.lineno).toBe(3);
         });
+
+        it('Ancre la décision if sur node.test uniquement', async () => {
+            const snapshot = await buildCfgSnapshot('if x > 0:\n    print(x)');
+            const ifNodeId = findNodeIdByLabelFragment(snapshot, 'x > 0');
+            const ifSpan = getNodeSourceSpan(snapshot, ifNodeId);
+
+            expect(ifSpan).toBeDefined();
+            expect(ifSpan.lineno).toBe(1);
+            expect(ifSpan.end_lineno).toBe(1);
+            expect(ifSpan.col_offset).toBe(3);
+            expect(ifSpan.end_col_offset).toBe(8);
+        });
+
+        it('Ancre la décision while sur node.test uniquement', async () => {
+            const snapshot = await buildCfgSnapshot('while x > 0:\n    x -= 1');
+            const whileNodeId = findNodeIdByLabelFragment(snapshot, 'x > 0');
+            const whileSpan = getNodeSourceSpan(snapshot, whileNodeId);
+
+            expect(whileSpan).toBeDefined();
+            expect(whileSpan.lineno).toBe(1);
+            expect(whileSpan.end_lineno).toBe(1);
+            expect(whileSpan.col_offset).toBe(6);
+            expect(whileSpan.end_col_offset).toBe(11);
+        });
+
+        it('Ancre les noeuds de contrôle du for sur la seule ligne d’en-tête', async () => {
+            const snapshot = await buildCfgSnapshot('for item in values:\n    print(item)');
+            const forControlFragments = [
+                'contient des éléments',
+                'Le premier élément',
+                'Encore un élément',
+                "l'élément suivant"
+            ];
+
+            forControlFragments.forEach(labelFragment => {
+                const nodeId = findNodeIdByLabelFragment(snapshot, labelFragment);
+                const span = getNodeSourceSpan(snapshot, nodeId);
+
+                expect(span).toBeDefined();
+                expect(span.lineno).toBe(1);
+                expect(span.end_lineno).toBe(1);
+                expect(span.col_offset).toBe(0);
+                expect(span.end_col_offset).toBe(19);
+            });
+        });
+
+        it('Ancre Start fonction sur la ligne def et laisse End fonction sans span source', async () => {
+            const snapshot = await buildCfgSnapshot('def fetch(config):\n    return config');
+            const startNodeId = findNodeIdByLabelFragment(snapshot, 'Start fetch');
+            const endNodeId = findNodeIdByLabelFragment(snapshot, 'End fetch');
+            const startSpan = getNodeSourceSpan(snapshot, startNodeId);
+            const endSpan = getNodeSourceSpan(snapshot, endNodeId);
+
+            expect(startSpan).toBeDefined();
+            expect(startSpan.lineno).toBe(1);
+            expect(startSpan.end_lineno).toBe(1);
+            expect(startSpan.col_offset).toBe(0);
+            expect(startSpan.end_col_offset).toBe(18);
+            expect(endSpan).toBe(null);
+        });
+
+        it('Ne fusionne pas des affectations top-level séparées par un def', async () => {
+            const snapshot = await buildCfgSnapshot(
+                'a = 1\ndef fetch(config):\n    return config\nb = 2\nprint(b)'
+            );
+            const assignmentBlockLabels = getNodeLabelsByType(snapshot, 'AssignmentBlock');
+
+            expect(assignmentBlockLabels.includes('a ← 1\nb ← 2')).toBe(false);
+            expect(findNodeIdByLabelFragment(snapshot, 'a ← 1')).toBeDefined();
+            expect(findNodeIdByLabelFragment(snapshot, 'b ← 2')).toBeDefined();
+        });
     });
 });

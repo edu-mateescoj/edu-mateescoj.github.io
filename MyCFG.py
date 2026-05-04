@@ -4,6 +4,8 @@ from typing import List, Dict, Set, Tuple, Optional, Any, Sequence
 
 class ControlFlowGraph:
     def __init__(self, code: str):
+        self.code = code
+        self.code_lines = code.splitlines()
         try:
             self.tree = ast.parse(code)
         except SyntaxError as e:
@@ -205,12 +207,48 @@ class ControlFlowGraph:
             self.main_flow_nodes.add(new_id)
         return new_id
 
+    def _build_source_span(
+        self,
+        source_start_node: Optional[ast.AST] = None,
+        source_end_node: Optional[ast.AST] = None,
+        source_span: Optional[Dict[str, Optional[int]]] = None,
+    ) -> Optional[Dict[str, Optional[int]]]:
+        """Construit une plage source normalisée pour l'éditeur et le front."""
+        if source_span is not None:
+            return dict(source_span)
+
+        if not (source_start_node or source_end_node):
+            return None
+
+        start_node = source_start_node or source_end_node
+        end_node = source_end_node or source_start_node
+        return {
+            "lineno": getattr(start_node, "lineno", None),
+            "end_lineno": getattr(end_node, "end_lineno", getattr(end_node, "lineno", None)),
+            "col_offset": getattr(start_node, "col_offset", None),
+            "end_col_offset": getattr(end_node, "end_col_offset", getattr(end_node, "col_offset", None)),
+        }
+
+    def _get_header_line_span(self, node: ast.AST) -> Optional[Dict[str, Optional[int]]]:
+        """Retourne la plage de la ligne d'en-tête d'une structure de contrôle ou d'une fonction."""
+        lineno = getattr(node, "lineno", None)
+        if lineno is None or lineno < 1 or lineno > len(self.code_lines):
+            return None
+
+        return {
+            "lineno": lineno,
+            "end_lineno": lineno,
+            "col_offset": getattr(node, "col_offset", 0),
+            "end_col_offset": len(self.code_lines[lineno - 1]),
+        }
+
     def add_node(
         self,
         label: str,
         node_type: str = "Process",
         source_start_node: Optional[ast.AST] = None,
         source_end_node: Optional[ast.AST] = None,
+        source_span: Optional[Dict[str, Optional[int]]] = None,
         render_payload: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Ajoute un nouveau nœud au graphe."""
@@ -225,15 +263,13 @@ class ControlFlowGraph:
         self.nodes.append((node_id, label))
         self.node_labels[node_id] = label
         self.node_types[node_id] = node_type
-        if source_start_node or source_end_node:
-            start_node = source_start_node or source_end_node
-            end_node = source_end_node or source_start_node
-            self.node_source_spans[node_id] = {
-                "lineno": getattr(start_node, "lineno", None),
-                "end_lineno": getattr(end_node, "end_lineno", getattr(end_node, "lineno", None)),
-                "col_offset": getattr(start_node, "col_offset", None),
-                "end_col_offset": getattr(end_node, "end_col_offset", getattr(end_node, "col_offset", None)),
-            }
+        span = self._build_source_span(
+            source_start_node=source_start_node,
+            source_end_node=source_end_node,
+            source_span=source_span,
+        )
+        if span and any(value is not None for value in span.values()):
+            self.node_source_spans[node_id] = span
         if render_payload:
             self.node_render_payloads[node_id] = render_payload
         return node_id
@@ -391,18 +427,24 @@ class ControlFlowGraph:
         # Le nœud Start du module. parent_id est None ici.
         # get_node_id ajoutera start_id à self.main_flow_nodes.
         start_id = self.add_node("Start", node_type="StartEnd") 
-        
-        function_defs = [n for n in node.body if isinstance(n, ast.FunctionDef)]
-        other_statements = [n for n in node.body if not isinstance(n, ast.FunctionDef)]
 
-        # 1. Visiter les définitions de fonctions.
-        #    Elles créent leurs propres sous-graphes et ne sont pas dans le flux principal du module.
-        for func_def_node in function_defs:
-            self.visit(func_def_node, None) # parent_id est None pour les func defs top-level.
+        # Les définitions de fonction ne participent pas au flux principal,
+        # mais elles doivent tout de même casser la contiguïté des blocs d'affectation.
+        module_flow_exits = [start_id]
+        pending_main_flow_statements: List[ast.stmt] = []
 
-        # 2. Visiter les autres instructions pour le flux principal du module.
-        #    Commence à partir du nœud 'Start' du module.
-        module_flow_exits = self.visit_body(other_statements, [start_id])
+        for top_level_node in node.body:
+            if isinstance(top_level_node, ast.FunctionDef):
+                if pending_main_flow_statements:
+                    module_flow_exits = self.visit_body(pending_main_flow_statements, module_flow_exits)
+                    pending_main_flow_statements = []
+                self.visit(top_level_node, None)
+                continue
+
+            pending_main_flow_statements.append(top_level_node)
+
+        if pending_main_flow_statements:
+            module_flow_exits = self.visit_body(pending_main_flow_statements, module_flow_exits)
         
         # Le nœud End du module. get_node_id l'ajoutera à self.main_flow_nodes.
         module_end_id = self.add_node("End", node_type="StartEnd")
@@ -423,11 +465,16 @@ class ControlFlowGraph:
         # 1. Gérer la portée pour les nœuds internes à cette fonction.
         #    Crée un nouvel ensemble vide pour les ID de nœuds de cette fonction.
         self._function_scope_stack.append(set()) 
+        function_header_span = self._get_header_line_span(node)
         
         # 2. Créer Start et End pour le *corps* de la fonction (sous-graphe).
         #    Ces nœuds seront automatiquement ajoutés à la portée de la fonction actuelle
         #    (et donc à self._function_scope_stack[-1]) par get_node_id.
-        func_body_start_id = self.add_node(f"Start {node.name}", node_type="StartEnd")
+        func_body_start_id = self.add_node(
+            f"Start {node.name}",
+            node_type="StartEnd",
+            source_span=function_header_span,
+        )
         func_body_end_id = self.add_node(f"End {node.name}", node_type="StartEnd")
 
         # 3. Visiter le corps de la fonction.
@@ -454,7 +501,7 @@ class ControlFlowGraph:
     def visit_If(self, node: ast.If, parent_id: str) -> List[str]:
         """Visite une instruction 'if' AST."""
         condition_text = ast.unparse(node.test).replace('"', '"') # Remplacer les guillemets pour Mermaid.
-        if_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node)
+        if_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node.test)
         self.add_edge(parent_id, if_decision_id)
 
         # Points de sortie finaux de la structure If globale.
@@ -532,6 +579,7 @@ class ControlFlowGraph:
         """
         iterator_variable_str = ast.unparse(node.target).replace('"', '"')
         iterable_node = node.iter # L'objet AST de l'itérable
+        for_header_span = self._get_header_line_span(node)
 
         iterable_kind_desc, elements_type_desc_raw, iterable_display_name, \
         article_indefini_element, article_defini_element = \
@@ -567,7 +615,11 @@ class ControlFlowGraph:
                 f"{iterable_display_name}<br>"
                 f"contient {self._format_entry_elements_phrase(elements_type_desc_raw)} ?"
             )
-            entry_decision_id = self.add_node(entry_decision_label, node_type="Decision", source_start_node=node)
+            entry_decision_id = self.add_node(
+                entry_decision_label,
+                node_type="Decision",
+                source_span=for_header_span,
+            )
             self.add_edge(parent_id, entry_decision_id)
             current_parent_for_loop_structure = entry_decision_id
         
@@ -579,7 +631,11 @@ class ControlFlowGraph:
             init_var_label = f"{iterator_variable_str} ← La première {elements_type_desc_raw}<br>de {iterable_display_name}"
         else: # "des" ou autre
             init_var_label = f"{iterator_variable_str} ← Les premier(es) {elements_type_desc_raw}<br>de {iterable_display_name}"
-        init_var_id = self.add_node(init_var_label, node_type="Process", source_start_node=node)
+        init_var_id = self.add_node(
+            init_var_label,
+            node_type="Process",
+            source_span=for_header_span,
+        )
 
         if entry_decision_id: # Si la première décision existe (on ne l'a pas sautée)
             self.add_edge(entry_decision_id, init_var_id, "Oui")
@@ -588,7 +644,11 @@ class ControlFlowGraph:
 
         # Nœuds pour le re-test et la mise à jour de l'itérateur
         retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans {iterable_display_name} ?"
-        retest_decision_id = self.add_node(retest_decision_label, node_type="Decision", source_start_node=node)
+        retest_decision_id = self.add_node(
+            retest_decision_label,
+            node_type="Decision",
+            source_span=for_header_span,
+        )
         
         next_element_phrase = self._join_article_and_noun(article_defini_element, elements_type_desc_raw)
         if article_indefini_element == "un":
@@ -597,7 +657,11 @@ class ControlFlowGraph:
             next_var_label = f"{iterator_variable_str} ← {next_element_phrase} suivante<br>de {iterable_display_name}"
         else: # "des" ou autre
             next_var_label = f"{iterator_variable_str} ← {next_element_phrase}s suivants<br>de {iterable_display_name}"
-        next_var_id = self.add_node(next_var_label, node_type="Process", source_start_node=node)
+        next_var_id = self.add_node(
+            next_var_label,
+            node_type="Process",
+            source_span=for_header_span,
+        )
 
         # --- Connexions et Flux ---
         loop_exit_id = self.add_node(".", node_type="Junction")
@@ -716,7 +780,7 @@ class ControlFlowGraph:
         else:
             condition_text = ast.unparse(node.test)
         condition_text = condition_text.replace('"', '"')
-        while_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node)
+        while_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node.test)
         self.add_edge(parent_id, while_decision_id)
 
         loop_exit_id = self.add_node(".", node_type="Junction")

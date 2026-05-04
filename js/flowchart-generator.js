@@ -203,6 +203,11 @@ function clearFlowchartNodeSelection(targetDiv) {
     });
 
     window.__selectedFlowchartNodeId = null;
+
+    // Éviter une trace visuelle orpheline dans l'éditeur quand le diagramme se désélectionne.
+    if (typeof window.clearEditorSourceSelection === 'function') {
+        window.clearEditorSourceSelection();
+    }
 }
 
 function applyFlowchartNodeSelection(targetDiv, nodeId) {
@@ -213,13 +218,13 @@ function applyFlowchartNodeSelection(targetDiv, nodeId) {
     });
 
     if (!nodeId) {
-        window.__selectedFlowchartNodeId = null;
+        clearFlowchartNodeSelection(targetDiv);
         return;
     }
 
     const selectedNode = targetDiv.querySelector(`g.node[data-node-id="${nodeId}"]`);
     if (!selectedNode) {
-        window.__selectedFlowchartNodeId = null;
+        clearFlowchartNodeSelection(targetDiv);
         return;
     }
 
@@ -339,10 +344,20 @@ function bindFlowchartSelectionHandlers(targetDiv) {
                 col_offset: Number.parseInt(clickedNodeGroup.dataset.colOffset || '', 10),
                 end_col_offset: Number.parseInt(clickedNodeGroup.dataset.endColOffset || '', 10),
             };
+            const hasExplicitSourceSpan = [
+                sourceSpan.editorLine,
+                sourceSpan.editorEndLine,
+                sourceSpan.lineno,
+                sourceSpan.end_lineno,
+                sourceSpan.col_offset,
+                sourceSpan.end_col_offset,
+            ].some(Number.isInteger);
 
             applyFlowchartNodeSelection(targetDiv, clickedNodeGroup.dataset.nodeId);
-            if (typeof window.selectEditorSourceRange === 'function') {
+            if (hasExplicitSourceSpan && typeof window.selectEditorSourceRange === 'function') {
                 window.selectEditorSourceRange(sourceSpan);
+            } else if (typeof window.clearEditorSourceSelection === 'function') {
+                window.clearEditorSourceSelection();
             }
             return;
         }
