@@ -404,6 +404,111 @@
                             </div>
                         </div>
                     </div>
+
+                    <div id="flowchart-render-options-card" class="border rounded bg-dark-subtle p-3 mb-4">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap mb-3">
+                            <div class="fw-bold">
+                                <i class="fas fa-project-diagram me-1"></i> Rendu du logigramme
+                            </div>
+                            <span class="text-muted small">Un seul rendu actif, sélectionnable</span>
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-source-annotation-visibility" class="form-label small mb-1">Annotations source</label>
+                                <select id="render-source-annotation-visibility" class="form-select form-select-sm">
+                                    <option value="show" selected>Garder l'annotation source</option>
+                                    <option value="hide">Enlever l'annotation source</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-missing-annotation-policy" class="form-label small mb-1">Variable non annotée</label>
+                                <select id="render-missing-annotation-policy" class="form-select form-select-sm">
+                                    <option value="keep_unannotated" selected>Garder tel quel</option>
+                                    <option value="infer">Ajouter l'annotation inférée</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-conflicting-annotation-policy" class="form-label small mb-1">Annotation incohérente</label>
+                                <select id="render-conflicting-annotation-policy" class="form-select form-select-sm">
+                                    <option value="keep_source" selected>Garder l'annotation source</option>
+                                    <option value="use_inferred">Corriger avec le type inféré</option>
+                                    <option value="hide">Enlever l'annotation</option>
+                                </select>
+                            </div>
+
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-assignment-grouping-mode" class="form-label small mb-1">Affectations / expressions</label>
+                                <select id="render-assignment-grouping-mode" class="form-select form-select-sm">
+                                    <option value="merged_block" selected>Bloc multi-ligne fusionné</option>
+                                    <option value="separate_nodes">Un rectangle par instruction</option>
+                                    <option value="stacked_compact">Rectangles compacts empilés</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-expression-grouping-policy" class="form-label small mb-1">Expressions contiguës</label>
+                                <select id="render-expression-grouping-policy" class="form-select form-select-sm">
+                                    <option value="keep_separate" selected>Garder séparées</option>
+                                    <option value="include_in_blocks">Inclure dans les blocs groupés</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-boolean-lexicon" class="form-label small mb-1">Opérateurs booléens</label>
+                                <select id="render-boolean-lexicon" class="form-select form-select-sm">
+                                    <option value="python" selected>and / or / not</option>
+                                    <option value="fr_lower">et / ou / non</option>
+                                    <option value="fr_upper">ET / OU / NON</option>
+                                    <option value="logic_symbols">v / ^ / ¬</option>
+                                    <option value="c_style">&& / || / !</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-comparison-glyph-mode" class="form-label small mb-1">Comparateurs ≤ ≥ ≠</label>
+                                <select id="render-comparison-glyph-mode" class="form-select form-select-sm">
+                                    <option value="ascii" selected>ASCII: &lt;= &gt;= !=</option>
+                                    <option value="math">Math: ≤ ≥ ≠</option>
+                                </select>
+                            </div>
+
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-equality-mode" class="form-label small mb-1">Égalité en condition</label>
+                                <select id="render-equality-mode" class="form-select form-select-sm">
+                                    <option value="double_equals" selected>==</option>
+                                    <option value="single_equals">=</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-membership-mode" class="form-label small mb-1">Opérateur in</label>
+                                <select id="render-membership-mode" class="form-select form-select-sm">
+                                    <option value="python" selected>in / not in</option>
+                                    <option value="french_dans">dans / n'est pas dans</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-for-loop-model" class="form-label small mb-1">Modèle de boucle for</label>
+                                <select id="render-for-loop-model" class="form-select form-select-sm">
+                                    <option value="single_has_next" selected>hasnext() uniquement</option>
+                                    <option value="empty_then_next">empty() puis hasnext()</option>
+                                </select>
+                            </div>
+
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-element-type-visibility" class="form-label small mb-1">Type d'élément dans la séquence</label>
+                                <select id="render-element-type-visibility" class="form-select form-select-sm">
+                                    <option value="hidden" selected>Ne pas faire allusion au type</option>
+                                    <option value="show">Mentionner caractère / nombre / mixte</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
+                                <label for="render-iterable-kind-visibility" class="form-label small mb-1">Nature de l'itérable</label>
+                                <select id="render-iterable-kind-visibility" class="form-select form-select-sm">
+                                    <option value="hidden" selected>Masquer</option>
+                                    <option value="show">Afficher chaîne / liste / variable / range</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- DANS LA PREMIÈRE CARTE (Générateur) -->
                     <!-- On remplace le bloc de boutons existant par celui-ci -->
                     <div class="d-flex gap-2 mb-3 flex-wrap align-items-center"> 

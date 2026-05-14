@@ -1236,6 +1236,28 @@ function clearConsole() {
     }
 }
 
+window.collectFlowchartRenderOptions = function() {
+    const getSelectValue = (id, defaultValue) => {
+        const selectElement = document.getElementById(id);
+        return selectElement ? selectElement.value : defaultValue;
+    };
+
+    return {
+        source_annotation_visibility: getSelectValue('render-source-annotation-visibility', 'show'),
+        missing_annotation_policy: getSelectValue('render-missing-annotation-policy', 'keep_unannotated'),
+        conflicting_annotation_policy: getSelectValue('render-conflicting-annotation-policy', 'keep_source'),
+        assignment_grouping_mode: getSelectValue('render-assignment-grouping-mode', 'merged_block'),
+        expression_grouping_policy: getSelectValue('render-expression-grouping-policy', 'keep_separate'),
+        boolean_lexicon: getSelectValue('render-boolean-lexicon', 'python'),
+        comparison_glyph_mode: getSelectValue('render-comparison-glyph-mode', 'ascii'),
+        equality_mode: getSelectValue('render-equality-mode', 'double_equals'),
+        membership_mode: getSelectValue('render-membership-mode', 'python'),
+        for_loop_model: getSelectValue('render-for-loop-model', 'single_has_next'),
+        element_type_visibility: getSelectValue('render-element-type-visibility', 'hidden'),
+        iterable_kind_visibility: getSelectValue('render-iterable-kind-visibility', 'hidden')
+    };
+};
+
 /**
  * Injecte dans un SVG un <style> contenant les règles CSS critiques
  * pour que le rendu PNG soit cohérent avec l'UI.
@@ -1640,12 +1662,31 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Boutons de changement de taille de police (CodeMirror) ---
     const fontDecreaseBtn = document.getElementById('font-decrease-btn');
     const fontIncreaseBtn = document.getElementById('font-increase-btn');
+    const flowchartRenderOptionsCard = document.getElementById('flowchart-render-options-card');
 
     if (fontDecreaseBtn) {
         fontDecreaseBtn.addEventListener('click', () => changeFontSize(-2));
     }
     if (fontIncreaseBtn) {
         fontIncreaseBtn.addEventListener('click', () => changeFontSize(+2));
+    }
+
+    if (flowchartRenderOptionsCard) {
+        const rerenderFlowchartWithCurrentOptions = async () => {
+            if (!codeEditorInstance || typeof triggerFlowchartUpdate !== 'function') return;
+            const currentCode = codeEditorInstance.getValue();
+            if (!currentCode || !currentCode.trim()) return;
+
+            try {
+                await triggerFlowchartUpdate();
+            } catch (error) {
+                console.error('Erreur lors du rafraîchissement du logigramme:', error);
+            }
+        };
+
+        flowchartRenderOptionsCard.querySelectorAll('select').forEach(selectElement => {
+            selectElement.addEventListener('change', rerenderFlowchartWithCurrentOptions);
+        });
     }
 
     // --- Gestionnaire pour "Générer un Code Aléatoire" ---

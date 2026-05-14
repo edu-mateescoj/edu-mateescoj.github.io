@@ -1,11 +1,7 @@
 # edu-mateescoj.github.io
 
 ## MyCFG.py: 
-- verbosité des boucles !!
--> for list: La variable (liste) 'ma_liste' contient des éléments? ... Le premier élément de 'ma_liste'...
--> for string : c'est le contraire! dnas le code "ma_chaine" mais dnas le logigramme ma_chaine
-- rappel du type de l'itérable dans la condition de boucle ?
-- rappel du type d'itérateur : pertinent ??
+- what else ?
 
 ## Dix prompts pour migration vers MVP implémentant Role Based Access Control:
 (inspiration: Classroom)

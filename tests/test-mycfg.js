@@ -1,21 +1,23 @@
 document.addEventListener('DOMContentLoaded', () => {
     let cfgSnapshotQueue = Promise.resolve();
 
-    function buildCfgSnapshot(code) {
+    function buildCfgSnapshot(code, renderConfig = {}) {
         const runSnapshot = async () => {
             await initPyodideAndLoadScript();
 
             pyodide.globals.set('cfg_test_code', code);
+            pyodide.globals.set('cfg_render_config_json', JSON.stringify(renderConfig || {}));
             const snapshotJson = await pyodide.runPythonAsync(`
 import json
 from MyCFG import ControlFlowGraph
 
-cfg = ControlFlowGraph(cfg_test_code)
+cfg = ControlFlowGraph(cfg_test_code, render_config=json.loads(cfg_render_config_json))
 cfg.process_and_get_results()
 
 json.dumps({
     "edges": sorted(list(cfg.edges)),
     "node_labels": cfg.node_labels,
+    "node_render_payloads": cfg.node_render_payloads,
     "node_types": cfg.node_types,
     "node_source_spans": cfg.node_source_spans,
 })
@@ -53,6 +55,10 @@ json.dumps({
         return snapshot.node_source_spans[nodeId] || null;
     }
 
+    function getNodeRenderPayload(snapshot, nodeId) {
+        return snapshot.node_render_payloads[nodeId] || null;
+    }
+
     describe('CFG MyCFG', () => {
         it('Relie break d\'un for a la sortie de boucle', async () => {
             const snapshot = await buildCfgSnapshot('for x in [1, 2]:\n    break\nprint("done")');
@@ -78,6 +84,36 @@ json.dumps({
             const breakTargetId = breakEdges[0][1];
             expect(snapshot.node_types[breakTargetId]).toBe('Junction');
             expect(getOutgoingEdges(snapshot, breakTargetId).some(([, toNode]) => toNode === afterNodeId)).toBe(true);
+        });
+
+        it('Prend le else d\'un while si la condition est fausse dès le départ', async () => {
+            const snapshot = await buildCfgSnapshot(
+                'while False:\n    print("body")\nelse:\n    print("no body")\nprint("after")'
+            );
+            const whileDecisionId = findNodeIdByLabelFragment(snapshot, 'False');
+            const elseNodeId = findNodeIdByLabelFragment(snapshot, 'no body');
+            const afterNodeId = findNodeIdByLabelFragment(snapshot, 'after');
+            const nonEdges = getOutgoingEdges(snapshot, whileDecisionId).filter(([, , label]) => label === 'Non');
+
+            expect(nonEdges.length).toBe(1);
+            expect(nonEdges[0][1]).toBe(elseNodeId);
+
+            const elseOutgoingEdges = getOutgoingEdges(snapshot, elseNodeId);
+            expect(elseOutgoingEdges.length).toBe(1);
+
+            const loopExitId = elseOutgoingEdges[0][1];
+            expect(snapshot.node_types[loopExitId]).toBe('Junction');
+            expect(getOutgoingEdges(snapshot, loopExitId).some(([, toNode]) => toNode === afterNodeId)).toBe(true);
+        });
+
+        it('Relie continue d\'un while au re-test de la condition', async () => {
+            const snapshot = await buildCfgSnapshot('while x > 0:\n    continue\nprint("after")');
+            const whileDecisionId = findNodeIdByLabelFragment(snapshot, 'x > 0');
+            const continueNodeId = findNodeIdByLabelFragment(snapshot, 'Continue');
+            const continueEdges = getOutgoingEdges(snapshot, continueNodeId);
+
+            expect(continueEdges.length).toBe(1);
+            expect(continueEdges[0][1]).toBe(whileDecisionId);
         });
 
         it('Découpe un while booléen sur la conjonction finale', async () => {
@@ -109,22 +145,38 @@ json.dumps({
             expect(outgoingTargets.includes(elseNodeId)).toBe(false);
         });
 
+        it('Relie continue d\'un for au contrôle de boucle', async () => {
+            const snapshot = await buildCfgSnapshot('for x in [1, 2]:\n    continue\nprint("after")');
+            const forDecisionId = findNodeIdByLabelFragment(snapshot, 'Reste-t-il un élément');
+            const continueNodeId = findNodeIdByLabelFragment(snapshot, 'Continue');
+            const continueEdges = getOutgoingEdges(snapshot, continueNodeId);
+
+            expect(continueEdges.length).toBe(1);
+            expect(continueEdges[0][1]).toBe(forDecisionId);
+        });
+
         it('Affiche un littéral de liste homogène sans le marquer mixte', async () => {
             const snapshot = await buildCfgSnapshot('for item in [1, 2, 3]:\n    print(item)');
             const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'Reste-t-il un élément');
+            const decisionPayload = getNodeRenderPayload(snapshot, decisionNodeId);
 
             expect(decisionLabels.some(label => label.includes('[1, 2, 3]'))).toBe(true);
-            expect(decisionLabels.some(label => label.includes('nombre'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('nombre'))).toBe(false);
             expect(decisionLabels.some(label => label.includes('élément mixte'))).toBe(false);
+            expect(decisionPayload.inferred_element_type).toBe('nombre');
         });
 
         it('Reconnaît une liste littérale homogène avec entier négatif', async () => {
             const snapshot = await buildCfgSnapshot('for item in [5, -3, 4, 4, 1]:\n    print(item)');
             const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'Reste-t-il un élément');
+            const decisionPayload = getNodeRenderPayload(snapshot, decisionNodeId);
 
             expect(decisionLabels.some(label => label.includes('[5, -3, 4, 4, 1]'))).toBe(true);
-            expect(decisionLabels.some(label => label.includes('nombre'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('nombre'))).toBe(false);
             expect(decisionLabels.some(label => label.includes('élément mixte'))).toBe(false);
+            expect(decisionPayload.inferred_element_type).toBe('nombre');
         });
 
         it('Affiche une variable de liste sans quotes ni préfixe verbeux', async () => {
@@ -139,10 +191,13 @@ json.dumps({
         it('Conserve le type nombre pour une variable de liste contenant un entier négatif', async () => {
             const snapshot = await buildCfgSnapshot('values = [5, -3, 4, 4, 1]\nfor item in values:\n    print(item)');
             const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'Reste-t-il un élément');
+            const decisionPayload = getNodeRenderPayload(snapshot, decisionNodeId);
 
             expect(decisionLabels.some(label => label.includes('values'))).toBe(true);
-            expect(decisionLabels.some(label => label.includes('nombres'))).toBe(true);
+            expect(decisionLabels.some(label => label.includes('nombre'))).toBe(false);
             expect(decisionLabels.some(label => label.includes('élément mixte'))).toBe(false);
+            expect(decisionPayload.inferred_element_type).toBe('nombre');
         });
 
         it('Affiche une variable issue d\'un appel sans rappeler sa provenance', async () => {
@@ -157,10 +212,33 @@ json.dumps({
         it('Affiche un littéral chaîne avec sa syntaxe Python', async () => {
             const snapshot = await buildCfgSnapshot('for ch in "abc":\n    print(ch)');
             const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'Reste-t-il un élément');
+            const decisionPayload = getNodeRenderPayload(snapshot, decisionNodeId);
 
             expect(decisionLabels.some(label => label.includes("'abc'"))).toBe(true);
             expect(decisionLabels.some(label => label.includes('la variable'))).toBe(false);
             expect(decisionLabels.some(label => label.includes('contenu:'))).toBe(false);
+            expect(decisionPayload.inferred_element_type).toBe('caractère');
+        });
+
+        it('Prend le else d\'un for vide sur la branche Non initiale', async () => {
+            const snapshot = await buildCfgSnapshot(
+                'for x in []:\n    print(x)\nelse:\n    print("empty")\nprint("after")'
+            );
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'Reste-t-il un élément');
+            const elseNodeId = findNodeIdByLabelFragment(snapshot, 'empty');
+            const afterNodeId = findNodeIdByLabelFragment(snapshot, 'after');
+            const nonEdges = getOutgoingEdges(snapshot, decisionNodeId).filter(([, , label]) => label === 'Non');
+
+            expect(nonEdges.length).toBe(1);
+            expect(nonEdges[0][1]).toBe(elseNodeId);
+
+            const elseOutgoingEdges = getOutgoingEdges(snapshot, elseNodeId);
+            expect(elseOutgoingEdges.length).toBe(1);
+
+            const loopExitId = elseOutgoingEdges[0][1];
+            expect(snapshot.node_types[loopExitId]).toBe('Junction');
+            expect(getOutgoingEdges(snapshot, loopExitId).some(([, toNode]) => toNode === afterNodeId)).toBe(true);
         });
 
         it('Fusionne des affectations simples consécutives dans un seul rectangle', async () => {
@@ -237,10 +315,8 @@ json.dumps({
         it('Ancre les noeuds de contrôle du for sur la seule ligne d’en-tête', async () => {
             const snapshot = await buildCfgSnapshot('for item in values:\n    print(item)');
             const forControlFragments = [
-                'contient des éléments',
-                'Le premier élément',
-                'Encore un élément',
-                "l'élément suivant"
+                'Reste-t-il un élément',
+                'prochain élément'
             ];
 
             forControlFragments.forEach(labelFragment => {
@@ -279,6 +355,132 @@ json.dumps({
             expect(assignmentBlockLabels.includes('a ← 1\nb ← 2')).toBe(false);
             expect(findNodeIdByLabelFragment(snapshot, 'a ← 1')).toBeDefined();
             expect(findNodeIdByLabelFragment(snapshot, 'b ← 2')).toBeDefined();
+        });
+
+        it('Garde l\'annotation source d\'une affectation annotée par défaut', async () => {
+            const snapshot = await buildCfgSnapshot('a: int = 2');
+
+            expect(findNodeIdByLabelFragment(snapshot, 'a : int ← 2')).toBeDefined();
+        });
+
+        it('Peut masquer l\'annotation source', async () => {
+            const snapshot = await buildCfgSnapshot('a: int = 2', {
+                source_annotation_visibility: 'hide'
+            });
+            const nodeId = findNodeIdByLabelFragment(snapshot, 'a ← 2');
+
+            expect(snapshot.node_labels[nodeId].includes(': int')).toBe(false);
+        });
+
+        it('Peut ajouter une annotation inférée sur une variable non annotée', async () => {
+            const snapshot = await buildCfgSnapshot('a = 3', {
+                missing_annotation_policy: 'infer'
+            });
+
+            expect(findNodeIdByLabelFragment(snapshot, 'a : int ← 3')).toBeDefined();
+        });
+
+        it('Peut corriger visuellement une annotation incohérente', async () => {
+            const snapshot = await buildCfgSnapshot('a: int = "Bonjour"', {
+                conflicting_annotation_policy: 'use_inferred'
+            });
+            const nodeId = findNodeIdByLabelFragment(snapshot, 'a : str');
+
+            expect(snapshot.node_labels[nodeId].includes('Bonjour')).toBe(true);
+            expect(snapshot.node_labels[nodeId].includes(': int')).toBe(false);
+        });
+
+        it('Peut séparer des affectations contiguës en rectangles distincts', async () => {
+            const snapshot = await buildCfgSnapshot('x = 1\ny = 2\nz = 3', {
+                assignment_grouping_mode: 'separate_nodes'
+            });
+            const assignmentBlockLabels = getNodeLabelsByType(snapshot, 'AssignmentBlock');
+
+            expect(assignmentBlockLabels.length).toBe(0);
+            expect(findNodeIdByLabelFragment(snapshot, 'x ← 1')).toBeDefined();
+            expect(findNodeIdByLabelFragment(snapshot, 'y ← 2')).toBeDefined();
+            expect(findNodeIdByLabelFragment(snapshot, 'z ← 3')).toBeDefined();
+        });
+
+        it('Peut inclure des expressions contiguës dans un bloc fusionné', async () => {
+            const snapshot = await buildCfgSnapshot('x = 1\nprint(x)\ny = 2', {
+                assignment_grouping_mode: 'merged_block',
+                expression_grouping_policy: 'include_in_blocks'
+            });
+            const mergedEntry = Object.entries(snapshot.node_labels).find(([, nodeLabel]) =>
+                nodeLabel === 'x ← 1\nprint(x)\ny ← 2'
+            );
+
+            expect(mergedEntry).toBeDefined();
+            expect(snapshot.node_types[mergedEntry[0]]).toBe('AssignmentBlock');
+        });
+
+        it('Expose le mode compact empilé dans le payload du bloc', async () => {
+            const snapshot = await buildCfgSnapshot('x = 1\ny = 2', {
+                assignment_grouping_mode: 'stacked_compact'
+            });
+            const assignmentBlockEntry = Object.entries(snapshot.node_types)
+                .find(([, nodeType]) => nodeType === 'AssignmentBlock');
+            const blockPayload = getNodeRenderPayload(snapshot, assignmentBlockEntry[0]);
+
+            expect(blockPayload.layout_mode).toBe('stacked_compact');
+        });
+
+        it('Peut rendre les conditions avec un lexique français et des comparateurs mathématiques', async () => {
+            const snapshot = await buildCfgSnapshot('if a <= b and x != y:\n    print(a)', {
+                boolean_lexicon: 'fr_lower',
+                comparison_glyph_mode: 'math'
+            });
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'a ≤ b et x ≠ y');
+
+            expect(snapshot.node_labels[decisionNodeId]).toContain('a ≤ b et x ≠ y');
+        });
+
+        it('Peut rendre l\'égalité et l\'appartenance selon les choix sélectionnés', async () => {
+            const snapshot = await buildCfgSnapshot('if x == y and elt in xs:\n    print(x)', {
+                boolean_lexicon: 'c_style',
+                equality_mode: 'single_equals',
+                membership_mode: 'french_dans'
+            });
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'x = y && elt dans xs');
+
+            expect(snapshot.node_labels[decisionNodeId]).toContain('x = y && elt dans xs');
+        });
+
+        it('Peut réactiver le modèle for avec premier et suivant', async () => {
+            const snapshot = await buildCfgSnapshot('for ch in "abc":\n    print(ch)', {
+                for_loop_model: 'empty_then_next',
+                element_type_visibility: 'show'
+            });
+
+            expect(findNodeIdByLabelFragment(snapshot, 'contient-il des caractères')).toBeDefined();
+            expect(findNodeIdByLabelFragment(snapshot, 'le premier élément (caractère)')).toBeDefined();
+            expect(findNodeIdByLabelFragment(snapshot, 'Encore un caractère')).toBeDefined();
+            expect(findNodeIdByLabelFragment(snapshot, "l'élément suivant (caractère)")).toBeDefined();
+        });
+
+        it('Peut afficher la nature de l\'itérable dans les libellés du for', async () => {
+            const snapshot = await buildCfgSnapshot('values = [1, 2]\nfor item in values:\n    print(item)', {
+                iterable_kind_visibility: 'show'
+            });
+            const decisionNodeId = findNodeIdByLabelFragment(snapshot, 'dans la variable values');
+            const assignmentNodeId = findNodeIdByLabelFragment(snapshot, 'de la variable values');
+
+            expect(snapshot.node_labels[decisionNodeId]).toContain('dans la variable values');
+            expect(snapshot.node_labels[assignmentNodeId]).toContain('de la variable values');
+        });
+
+        it('Conserve le else d\'un for vide avec le modèle empty puis next', async () => {
+            const snapshot = await buildCfgSnapshot(
+                'for x in []:\n    print(x)\nelse:\n    print("empty")\nprint("after")',
+                { for_loop_model: 'empty_then_next' }
+            );
+            const entryDecisionId = findNodeIdByLabelFragment(snapshot, 'contient-il des éléments');
+            const elseNodeId = findNodeIdByLabelFragment(snapshot, 'empty');
+            const nonEdges = getOutgoingEdges(snapshot, entryDecisionId).filter(([, , label]) => label === 'Non');
+
+            expect(nonEdges.length).toBe(1);
+            expect(nonEdges[0][1]).toBe(elseNodeId);
         });
     });
 });

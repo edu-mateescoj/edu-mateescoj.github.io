@@ -99,9 +99,10 @@ print("Module MyCFG importé avec succès.")
 /**
  * Génère le diagramme Mermaid à partir du code Python fourni.
  * @param {string} pythonCode Le code Python à analyser.
+ * @param {Object|null} renderConfig Options de rendu du logigramme.
  * @returns {Promise<Object|null>} Un objet { mermaid, canonicalCode, ast_dump, detectedTypes } ou null.
  */
-async function generateFlowchartFromCode(pythonCode) {
+async function generateFlowchartFromCode(pythonCode, renderConfig = null) {
     setLoadingState(true);
     try {
         await initPyodideAndLoadScript();
@@ -118,6 +119,10 @@ async function generateFlowchartFromCode(pythonCode) {
         }
 
         pyodide.globals.set("user_code_to_analyze", pythonCode);
+        pyodide.globals.set(
+            "flowchart_render_config_json",
+            JSON.stringify(renderConfig && typeof renderConfig === 'object' ? renderConfig : {})
+        );
 
         const pythonScript = `
 import sys
@@ -131,7 +136,8 @@ output = {}
 
 try:
     current_code = user_code_to_analyze
-    cfg_instance = ControlFlowGraph(current_code)
+    render_config = json.loads(flowchart_render_config_json)
+    cfg_instance = ControlFlowGraph(current_code, render_config=render_config)
     output = cfg_instance.process_and_get_results()
 
     if not isinstance(output, dict):
@@ -590,7 +596,12 @@ async function triggerFlowchartUpdate() {
 
     if (currentCode) {
         // 1. On appelle la fonction et on stocke l'objet complet dans "results"
-        var results = await generateFlowchartFromCode(currentCode);
+        var renderOptions = null;
+        if (typeof window.collectFlowchartRenderOptions === 'function') {
+            renderOptions = window.collectFlowchartRenderOptions();
+        }
+
+        var results = await generateFlowchartFromCode(currentCode, renderOptions);
 
         // 2. On vérifie que l'objet "results" existe ET qu'il contient bien la propriété "mermaid"
         if (results && results.mermaid) {

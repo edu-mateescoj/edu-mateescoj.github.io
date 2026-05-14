@@ -2,10 +2,27 @@ import ast
 import html
 from typing import List, Dict, Set, Tuple, Optional, Any, Sequence
 
+
+DEFAULT_RENDER_CONFIG: Dict[str, str] = {
+    "source_annotation_visibility": "show",
+    "missing_annotation_policy": "keep_unannotated",
+    "conflicting_annotation_policy": "keep_source",
+    "assignment_grouping_mode": "merged_block",
+    "expression_grouping_policy": "keep_separate",
+    "boolean_lexicon": "python",
+    "comparison_glyph_mode": "ascii",
+    "equality_mode": "double_equals",
+    "membership_mode": "python",
+    "for_loop_model": "single_has_next",
+    "iterable_kind_visibility": "hidden",
+    "element_type_visibility": "hidden",
+}
+
 class ControlFlowGraph:
-    def __init__(self, code: str):
+    def __init__(self, code: str, render_config: Optional[Dict[str, Any]] = None):
         self.code = code
         self.code_lines = code.splitlines()
+        self.render_config = self._normalize_render_config(render_config)
         try:
             self.tree = ast.parse(code)
         except SyntaxError as e:
@@ -40,6 +57,308 @@ class ControlFlowGraph:
         # Ex: "my_string" -> (ast.Constant, "chaîne")
         self.variable_assignments: Dict[str, Tuple[type, Any]] = {}
 
+    def _normalize_render_config(self, render_config: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """Construit une configuration de rendu stable en fusionnant les overrides reçus."""
+        normalized = dict(DEFAULT_RENDER_CONFIG)
+        if not isinstance(render_config, dict):
+            return normalized
+
+        for key, default_value in DEFAULT_RENDER_CONFIG.items():
+            candidate_value = render_config.get(key)
+            if isinstance(candidate_value, str) and candidate_value:
+                normalized[key] = candidate_value
+            else:
+                normalized[key] = default_value
+
+        return normalized
+
+    def _get_render_option(self, key: str) -> str:
+        """Retourne une option de rendu normalisée."""
+        return self.render_config.get(key, DEFAULT_RENDER_CONFIG[key])
+
+    def _is_groupable_statement(self, node: ast.stmt, grouping_mode: Optional[str] = None) -> bool:
+        """Indique si une instruction peut participer à un bloc visuel compact."""
+        if isinstance(node, ast.Expr):
+            return (
+                grouping_mode in ("merged_block", "stacked_compact") and
+                self._get_render_option("expression_grouping_policy") == "include_in_blocks"
+            )
+        return isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign))
+
+    def _annotation_from_inferred_type(self, inferred_type: str) -> Optional[str]:
+        """Mappe un type simple inféré vers un nom d'annotation Python affichable."""
+        annotation_map = {
+            "int": "int",
+            "float": "float",
+            "str": "str",
+            "bool": "bool",
+            "list": "list",
+        }
+        return annotation_map.get(inferred_type)
+
+    def _infer_type_from_statement(self, node: ast.stmt) -> str:
+        """Infère un type simple à partir d'une instruction de rendu."""
+        if isinstance(node, ast.Assign):
+            return self._infer_type_from_value_node(node.value)
+
+        if isinstance(node, ast.AnnAssign):
+            if node.value is not None:
+                return self._infer_type_from_value_node(node.value)
+            if isinstance(node.annotation, ast.Name):
+                return node.annotation.id
+            return "unknown"
+
+        if isinstance(node, ast.AugAssign):
+            if isinstance(node.target, ast.Name) and node.target.id in self.variable_assignments:
+                assigned_ast_type, assigned_value_or_desc = self.variable_assignments[node.target.id]
+                return self._normalize_assignment_entry_type(assigned_ast_type, assigned_value_or_desc)
+            return "unknown"
+
+        return "unknown"
+
+    def _get_visible_annotation_text(self, node: ast.stmt) -> Optional[str]:
+        """Détermine l'annotation visible à afficher selon la configuration de rendu."""
+        source_annotation_text: Optional[str] = None
+        if isinstance(node, ast.AnnAssign) and node.annotation is not None:
+            source_annotation_text = ast.unparse(node.annotation).replace('"', '"')
+
+        inferred_annotation_text = self._annotation_from_inferred_type(self._infer_type_from_statement(node))
+
+        if source_annotation_text:
+            if self._get_render_option("source_annotation_visibility") == "hide":
+                return None
+
+            if not inferred_annotation_text or inferred_annotation_text == source_annotation_text:
+                return source_annotation_text
+
+            conflict_policy = self._get_render_option("conflicting_annotation_policy")
+            if conflict_policy == "use_inferred":
+                return inferred_annotation_text
+            if conflict_policy == "hide":
+                return None
+            return source_annotation_text
+
+        if self._get_render_option("missing_annotation_policy") == "infer":
+            return inferred_annotation_text
+
+        return None
+
+    def _get_call_display_parts(self, node: ast.Call) -> Dict[str, str]:
+        """Construit les parties d'affichage d'un appel de fonction ou méthode."""
+        func_name_str = ast.unparse(node.func).replace('"', '#quot;')
+        args_list_str = [ast.unparse(arg).replace('"', '#quot;') for arg in node.args]
+        double_quote_char = '"'
+        kwargs_list_str = [
+            f"{keyword.arg}={ast.unparse(keyword.value).replace(double_quote_char, '#quot;')}"
+            for keyword in node.keywords
+        ]
+        all_args_concatenated_str = ", ".join(args_list_str + kwargs_list_str)
+
+        max_args_display_length = 60
+        if len(all_args_concatenated_str) > max_args_display_length:
+            all_args_concatenated_str = all_args_concatenated_str[:max_args_display_length - 3] + "..."
+
+        label_text = f"{func_name_str}({all_args_concatenated_str})"
+        node_type = "Process"
+        if func_name_str in ["print", "input"]:
+            node_type = "IoOperation"
+        else:
+            label_text = f"Appel: {label_text}"
+
+        return {
+            "label_text": label_text,
+            "node_type": node_type,
+        }
+
+    def _get_statement_display_parts(self, node: ast.stmt) -> Dict[str, str]:
+        """Construit les parties d'affichage d'une instruction groupable."""
+        if isinstance(node, ast.Assign):
+            target_text = ", ".join([ast.unparse(target).replace('"', '"') for target in node.targets])
+            operator_text = "←"
+            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
+            annotation_text = self._get_visible_annotation_text(node) or ""
+            return {
+                "kind": "assignment",
+                "target": target_text,
+                "annotation": annotation_text,
+                "operator": operator_text,
+                "value": value_text,
+            }
+
+        if isinstance(node, ast.AnnAssign):
+            target_text = ast.unparse(node.target).replace('"', '"')
+            operator_text = "←" if node.value is not None else ""
+            value_text = ast.unparse(node.value).replace('"', '"') if node.value is not None else ""
+            annotation_text = self._get_visible_annotation_text(node) or ""
+            return {
+                "kind": "assignment",
+                "target": target_text,
+                "annotation": annotation_text,
+                "operator": operator_text,
+                "value": value_text,
+            }
+
+        if isinstance(node, ast.AugAssign):
+            target_text = ast.unparse(node.target).replace('"', '"')
+            operator_text = self._get_augassign_operator_text(node.op)
+            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
+            annotation_text = self._get_visible_annotation_text(node) or ""
+            return {
+                "kind": "assignment",
+                "target": target_text,
+                "annotation": annotation_text,
+                "operator": operator_text,
+                "value": value_text,
+            }
+
+        if isinstance(node, ast.Expr):
+            if isinstance(node.value, ast.Call):
+                call_display = self._get_call_display_parts(node.value)
+                expression_text = call_display["label_text"]
+            else:
+                expression_text = ast.unparse(node.value).replace('"', '"')
+            return {
+                "kind": "expression",
+                "text": expression_text,
+                "target": "",
+                "annotation": "",
+                "operator": "",
+                "value": "",
+            }
+
+        raise TypeError(f"Instruction groupable non supportée: {type(node).__name__}")
+
+    def _compose_statement_display_text(self, statement_parts: Dict[str, str]) -> str:
+        """Assemble le texte final d'une instruction groupable."""
+        if statement_parts.get("kind") == "expression":
+            return statement_parts.get("text", "")
+
+        target_text = statement_parts.get("target", "")
+        annotation_text = statement_parts.get("annotation", "")
+        if annotation_text:
+            target_text = f"{target_text} : {annotation_text}"
+
+        label_parts = [target_text]
+        if statement_parts.get("operator"):
+            label_parts.append(statement_parts["operator"])
+        if statement_parts.get("value"):
+            label_parts.append(statement_parts["value"])
+
+        return " ".join([part for part in label_parts if part]).strip()
+
+    def _format_statement_label(self, node: ast.stmt) -> str:
+        """Formate une instruction groupable pour le rendu Mermaid."""
+        label_text = self._compose_statement_display_text(self._get_statement_display_parts(node))
+
+        max_label_length = 60
+        if len(label_text) > max_label_length:
+            label_text = label_text[:max_label_length - 3] + "..."
+
+        return label_text
+
+    def _get_boolean_operator_text(self, operator: ast.boolop) -> str:
+        """Retourne le texte de l'opérateur booléen selon le lexique actif."""
+        lexicon_mode = self._get_render_option("boolean_lexicon")
+        if isinstance(operator, ast.And):
+            return {
+                "python": "and",
+                "fr_lower": "et",
+                "fr_upper": "ET",
+                "logic_symbols": "^",
+                "c_style": "&&",
+            }.get(lexicon_mode, "and")
+
+        return {
+            "python": "or",
+            "fr_lower": "ou",
+            "fr_upper": "OU",
+            "logic_symbols": "v",
+            "c_style": "||",
+        }.get(lexicon_mode, "or")
+
+    def _get_not_operator_text(self) -> str:
+        """Retourne le texte de la négation logique selon le lexique actif."""
+        return {
+            "python": "not",
+            "fr_lower": "non",
+            "fr_upper": "NON",
+            "logic_symbols": "¬",
+            "c_style": "!",
+        }.get(self._get_render_option("boolean_lexicon"), "not")
+
+    def _get_compare_operator_text(self, operator: ast.cmpop) -> str:
+        """Retourne le texte d'un opérateur de comparaison selon le rendu choisi."""
+        comparison_mode = self._get_render_option("comparison_glyph_mode")
+        equality_mode = self._get_render_option("equality_mode")
+        membership_mode = self._get_render_option("membership_mode")
+
+        if isinstance(operator, ast.Eq):
+            return "=" if equality_mode == "single_equals" else "=="
+        if isinstance(operator, ast.NotEq):
+            return "≠" if comparison_mode == "math" else "!="
+        if isinstance(operator, ast.LtE):
+            return "≤" if comparison_mode == "math" else "<="
+        if isinstance(operator, ast.GtE):
+            return "≥" if comparison_mode == "math" else ">="
+        if isinstance(operator, ast.In):
+            return "dans" if membership_mode == "french_dans" else "in"
+        if isinstance(operator, ast.NotIn):
+            return "n'est pas dans" if membership_mode == "french_dans" else "not in"
+        if isinstance(operator, ast.Is):
+            return "is"
+        if isinstance(operator, ast.IsNot):
+            return "is not"
+        if isinstance(operator, ast.Lt):
+            return "<"
+        if isinstance(operator, ast.Gt):
+            return ">"
+
+        return ast.unparse(operator)
+
+    def _format_condition_expression(self, node: ast.AST) -> str:
+        """Formate récursivement une expression booléenne/comparative pour les conditions."""
+        if isinstance(node, ast.BoolOp):
+            operator_text = self._get_boolean_operator_text(node.op)
+            rendered_values: List[str] = []
+            for value in node.values:
+                value_text = self._format_condition_expression(value)
+                if isinstance(value, ast.BoolOp) and type(value.op) is not type(node.op):
+                    value_text = f"({value_text})"
+                rendered_values.append(value_text)
+            return f" {operator_text} ".join(rendered_values)
+
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            operand_text = self._format_condition_expression(node.operand)
+            if isinstance(node.operand, ast.BoolOp):
+                operand_text = f"({operand_text})"
+            return f"{self._get_not_operator_text()} {operand_text}"
+
+        if isinstance(node, ast.Compare):
+            rendered_parts: List[str] = [self._format_condition_expression(node.left)]
+            for operator, comparator in zip(node.ops, node.comparators):
+                rendered_parts.append(self._get_compare_operator_text(operator))
+                rendered_parts.append(self._format_condition_expression(comparator))
+            return " ".join(rendered_parts)
+
+        return ast.unparse(node)
+
+    def _format_condition_text(self, node: ast.AST, multiline_final_boolop: bool = False) -> str:
+        """Formate le texte d'une condition en tenant compte du lexique configuré."""
+        if multiline_final_boolop and isinstance(node, ast.BoolOp) and len(node.values) > 1:
+            leading_values = node.values[:-1]
+            trailing_value = node.values[-1]
+            if len(leading_values) == 1:
+                first_line = self._format_condition_expression(leading_values[0])
+                if isinstance(leading_values[0], ast.BoolOp):
+                    first_line = f"({first_line})"
+            else:
+                first_line = self._format_condition_expression(ast.BoolOp(op=node.op, values=leading_values))
+
+            final_operator = self._get_boolean_operator_text(node.op)
+            return f"{first_line}\n{final_operator} {self._format_condition_expression(trailing_value)}"
+
+        return self._format_condition_expression(node)
+
     def process_and_get_results(self) -> dict:
         """
         Méthode centrale qui génère le diagramme ET le code normalisé.
@@ -62,6 +381,8 @@ class ControlFlowGraph:
             "canonical_code": canonical_code_string,
             "ast_dump": ast.dump(self.tree),
             "detected_types": detected_types,
+            "render_config": self.render_config,
+            "node_render_payloads": self.node_render_payloads,
             "node_source_spans": self.node_source_spans,
             "error": None
         }
@@ -323,29 +644,30 @@ class ControlFlowGraph:
                  active_ids_for_current_statement = [] 
                  break
 
-            assign_block: List[ast.stmt] = []
-            if isinstance(stmt, (ast.Assign, ast.AugAssign)):
-                assign_block.append(stmt)
+            statement_block: List[ast.stmt] = []
+            grouping_mode = self._get_render_option("assignment_grouping_mode")
+            if grouping_mode in ("merged_block", "stacked_compact") and self._is_groupable_statement(stmt, grouping_mode):
+                statement_block.append(stmt)
                 next_index = i + 1
                 while next_index < len(body):
                     next_stmt = body[next_index]
-                    if not isinstance(next_stmt, (ast.Assign, ast.AugAssign)):
+                    if not self._is_groupable_statement(next_stmt, grouping_mode):
                         break
-                    assign_block.append(next_stmt)
+                    statement_block.append(next_stmt)
                     next_index += 1
 
             # Collecter les points de sortie de l'instruction courante, pour tous les chemins d'entrée.
             exits_from_current_stmt_all_paths: List[str] = []
             for parent_id in current_stmt_entry_points:
-                if len(assign_block) > 1:
-                    exit_nodes_from_stmt_path = self._visit_assignment_block(assign_block, parent_id)
+                if len(statement_block) > 1:
+                    exit_nodes_from_stmt_path = self._visit_assignment_block(statement_block, parent_id)
                 else:
                     # visit() retourne les ID des nœuds de sortie de stmt pour ce parent_id.
                     exit_nodes_from_stmt_path = self.visit(stmt, parent_id)
                 exits_from_current_stmt_all_paths.extend(exit_nodes_from_stmt_path)
 
-            if len(assign_block) > 1:
-                i += len(assign_block) - 1
+            if len(statement_block) > 1:
+                i += len(statement_block) - 1
             
             # Les points de sortie de l'instruction courante deviennent les points d'entrée potentiels pour la suivante.
             active_ids_for_current_statement = list(set(exits_from_current_stmt_all_paths))
@@ -500,7 +822,7 @@ class ControlFlowGraph:
     
     def visit_If(self, node: ast.If, parent_id: str) -> List[str]:
         """Visite une instruction 'if' AST."""
-        condition_text = ast.unparse(node.test).replace('"', '"') # Remplacer les guillemets pour Mermaid.
+        condition_text = self._format_condition_text(node.test).replace('"', '"')
         if_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node.test)
         self.add_edge(parent_id, if_decision_id)
 
@@ -568,161 +890,129 @@ class ControlFlowGraph:
         # Retourner les points de sortie uniques. visit_body s'occupera de les fusionner si nécessaire.
         return list(set(final_exit_nodes_after_if))
 
-    def visit_For(self, node: ast.For, parent_id: str) -> List[str]:
-        """
-        Visite une boucle 'for' AST en utilisant une structure détaillée unifiée.
-        Si l'itérable est un range() avec des arguments littéraux, il est traité comme une liste explicite.
+    def _get_for_element_display_parts(
+        self,
+        elements_type_desc_raw: str,
+        article_indefini_element: str,
+    ) -> Dict[str, str]:
+        """Construit les libellés d'élément visibles pour les variantes de boucle for."""
+        show_element_type = self._get_render_option("element_type_visibility") == "show"
+        singular_map = {
+            "caractère": "caractère",
+            "nombre": "nombre",
+            "chaîne": "chaîne",
+            "booléen": "booléen",
+            "clé": "clé",
+            "variable": "variable",
+            "élément mixte": "élément mixte",
+            "élément": "élément",
+        }
+        plural_map = {
+            "caractère": "caractères",
+            "nombre": "nombres",
+            "chaîne": "chaînes",
+            "booléen": "booléens",
+            "clé": "clés",
+            "variable": "variables",
+            "élément mixte": "éléments mixtes",
+            "élément": "éléments",
+        }
 
-        Cette méthode est le point d'entrée actif pour toutes les boucles 'for'.
-        Elle a remplacé l'ancien helper _visit_for_generic_iterable afin de garder
-        une seule logique CFG pour les littéraux, les variables et les range().
-        """
+        decision_singular = singular_map.get(elements_type_desc_raw, "élément") if show_element_type else "élément"
+        decision_plural = plural_map.get(elements_type_desc_raw, "éléments") if show_element_type else "éléments"
+        assignment_type_suffix = ""
+        if show_element_type and elements_type_desc_raw and elements_type_desc_raw != "élément":
+            suffix_text = "mixte" if elements_type_desc_raw == "élément mixte" else elements_type_desc_raw
+            assignment_type_suffix = f" ({suffix_text})"
+
+        return {
+            "decision_article": article_indefini_element if show_element_type else "un",
+            "decision_singular": decision_singular,
+            "decision_plural": decision_plural,
+            "assignment_type_suffix": assignment_type_suffix,
+        }
+
+    def _build_for_loop_render_context(self, node: ast.For) -> Dict[str, Any]:
+        """Construit les informations partagées entre les variantes de rendu de boucle for."""
         iterator_variable_str = ast.unparse(node.target).replace('"', '"')
-        iterable_node = node.iter # L'objet AST de l'itérable
-        for_header_span = self._get_header_line_span(node)
+        iterable_kind_desc, elements_type_desc_raw, iterable_display_name, article_indefini_element, _ = \
+            self._get_iterable_description(node.iter)
+        element_display = self._get_for_element_display_parts(elements_type_desc_raw, article_indefini_element)
+        iterable_reference_text = self._get_iterable_reference_text(iterable_kind_desc, iterable_display_name)
+        return {
+            "iterator_variable": iterator_variable_str,
+            "iterable_kind_desc": iterable_kind_desc,
+            "inferred_element_type": elements_type_desc_raw,
+            "iterable_display_name": iterable_display_name,
+            "iterable_reference_text": iterable_reference_text,
+            "for_header_span": self._get_header_line_span(node),
+            "decision_article": element_display["decision_article"],
+            "decision_singular": element_display["decision_singular"],
+            "decision_plural": element_display["decision_plural"],
+            "assignment_type_suffix": element_display["assignment_type_suffix"],
+        }
 
-        iterable_kind_desc, elements_type_desc_raw, iterable_display_name, \
-        article_indefini_element, article_defini_element = \
-            self._get_iterable_description(iterable_node)
+    def _visit_for_single_has_next(self, node: ast.For, parent_id: str, loop_context: Dict[str, Any]) -> List[str]:
+        """Rendu actuel: un seul test de poursuite, sans cas spécial visible pour le premier passage."""
+        loop_render_payload = {
+            "kind": "for_loop_control",
+            "iterator_variable": loop_context["iterator_variable"],
+            "iterable_display_name": loop_context["iterable_display_name"],
+            "iterable_kind_desc": loop_context["iterable_kind_desc"],
+            "inferred_element_type": loop_context["inferred_element_type"],
+            "for_loop_model": self._get_render_option("for_loop_model"),
+        }
 
-        # Option pour simplifier si l'itérable est un littéral non vide
-        # (ex: "abc", [1,2], range(5) qui n'est jamais vide)
-        skip_first_check = False
-        if isinstance(iterable_node, (ast.Constant, ast.List, ast.Tuple, ast.Set)): # Littéral itérable
-            if isinstance(iterable_node, ast.Constant) and iterable_node.value: # Chaîne non vide
-                skip_first_check = True
-            elif isinstance(iterable_node, (ast.List, ast.Tuple, ast.Set)) and iterable_node.elts: # Liste/Tuple non vide
-                skip_first_check = True
-        elif isinstance(iterable_node, ast.Call) and \
-             isinstance(iterable_node.func, ast.Name) and \
-             iterable_node.func.id == 'range':
-            # Si _evaluate_range_to_list_str a réussi ET que la liste n'est pas vide
-             if "[" in iterable_display_name and iterable_display_name != "[]": # Heuristique !!
-                skip_first_check = True
-        
-        # Un range peut être vide, mais pour la structure, on pourrait le traiter comme non vide initialement
-        # si on veut sauter le premier test. Cependant, range(0) est vide, range(2,1) aussi...
-        # Il faudrait évaluer les arguments de range pour être sûr.
-        # Pour l'instant, on ne saute pas pour range().
-        #   pass
-
-
-        entry_decision_id = None 
-
-        if not skip_first_check:
-            # 1. Première Décision: Y a-t-il des éléments à traiter ?
-            entry_decision_label = (
-                f"{iterable_display_name}<br>"
-                f"contient {self._format_entry_elements_phrase(elements_type_desc_raw)} ?"
-            )
-            entry_decision_id = self.add_node(
-                entry_decision_label,
-                node_type="Decision",
-                source_span=for_header_span,
-            )
-            self.add_edge(parent_id, entry_decision_id)
-            current_parent_for_loop_structure = entry_decision_id
-        
-        # 2. Initialisation de la variable locale au premier élément
-        # Utiliser les articles pour les labels d'initialisation et de mise à jour
-        if article_indefini_element == "un":
-            init_var_label = f"{iterator_variable_str} ← Le premier {elements_type_desc_raw}<br>de {iterable_display_name}"
-        elif article_indefini_element == "une":
-            init_var_label = f"{iterator_variable_str} ← La première {elements_type_desc_raw}<br>de {iterable_display_name}"
-        else: # "des" ou autre
-            init_var_label = f"{iterator_variable_str} ← Les premier(es) {elements_type_desc_raw}<br>de {iterable_display_name}"
-        init_var_id = self.add_node(
-            init_var_label,
-            node_type="Process",
-            source_span=for_header_span,
-        )
-
-        if entry_decision_id: # Si la première décision existe (on ne l'a pas sautée)
-            self.add_edge(entry_decision_id, init_var_id, "Oui")
-        else: # On a sauté la première vérification, connecter directement depuis le parent de la boucle For
-            self.add_edge(parent_id, init_var_id)
-
-        # Nœuds pour le re-test et la mise à jour de l'itérateur
-        retest_decision_label = f"Encore {article_indefini_element} {elements_type_desc_raw}<br>dans {iterable_display_name} ?"
-        retest_decision_id = self.add_node(
-            retest_decision_label,
+        for_decision_id = self.add_node(
+            f"Reste-t-il {loop_context['decision_article']} {loop_context['decision_singular']}<br>à parcourir dans {loop_context['iterable_reference_text']} ?",
             node_type="Decision",
-            source_span=for_header_span,
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "decision",
+            },
         )
-        
-        next_element_phrase = self._join_article_and_noun(article_defini_element, elements_type_desc_raw)
-        if article_indefini_element == "un":
-            next_var_label = f"{iterator_variable_str} ← {next_element_phrase} suivant<br>de {iterable_display_name}"
-        elif article_indefini_element == "une":
-            next_var_label = f"{iterator_variable_str} ← {next_element_phrase} suivante<br>de {iterable_display_name}"
-        else: # "des" ou autre
-            next_var_label = f"{iterator_variable_str} ← {next_element_phrase}s suivants<br>de {iterable_display_name}"
-        next_var_id = self.add_node(
-            next_var_label,
+        self.add_edge(parent_id, for_decision_id)
+
+        next_element_id = self.add_node(
+            f"{loop_context['iterator_variable']} ← prochain élément{loop_context['assignment_type_suffix']}<br>de {loop_context['iterable_reference_text']}",
             node_type="Process",
-            source_span=for_header_span,
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "assignment",
+            },
         )
+        self.add_edge(for_decision_id, next_element_id, "Oui")
 
-        # --- Connexions et Flux ---
         loop_exit_id = self.add_node(".", node_type="Junction")
+        self.loop_stack.append((for_decision_id, loop_exit_id, for_decision_id))
 
-        if entry_decision_id:
-            self.add_edge(entry_decision_id, loop_exit_id, "Non")
-
-        # continue -> retest_decision_id
-        # break -> sortie explicite de la boucle
-        # retest (après le corps) -> retest_decision_id
-        self.loop_stack.append((retest_decision_id, loop_exit_id, retest_decision_id))
-
-        # Visiter le corps de la boucle
         body_exit_nodes: List[str] = []
-        first_node_of_body: Optional[str] = None
         if node.body:
             nodes_before_body = {nid for nid, _ in self.nodes}
-            # Le corps de la boucle commence après l'initialisation de la variable (init_var_id)
-            body_exit_nodes = self.visit_body(node.body, [init_var_id]) 
+            body_exit_nodes = self.visit_body(node.body, [next_element_id])
             nodes_after_body = {nid for nid, _ in self.nodes}
             new_nodes_in_body = sorted(list(nodes_after_body - nodes_before_body), key=lambda x: int(x.replace("node", "")))
             if new_nodes_in_body:
                 first_node_of_body = new_nodes_in_body[0]
-                # S'assurer que l'arête init_var_id -> first_node_of_body est simple (sans label "Oui")
-                if (init_var_id, first_node_of_body, "Oui") in self.edges:
-                    self.edges.remove((init_var_id, first_node_of_body, "Oui"))
-                    self.add_edge(init_var_id, first_node_of_body, "") # Flux direct
-                elif (init_var_id, first_node_of_body, "") not in self.edges and \
-                     (init_var_id, first_node_of_body, "Non") not in self.edges : # Éviter double arête
-                     self.add_edge(init_var_id, first_node_of_body, "")
+                if (next_element_id, first_node_of_body, "Oui") in self.edges:
+                    self.edges.remove((next_element_id, first_node_of_body, "Oui"))
+                    self.add_edge(next_element_id, first_node_of_body, "")
+                elif (next_element_id, first_node_of_body, "") not in self.edges and \
+                     (next_element_id, first_node_of_body, "Non") not in self.edges:
+                    self.add_edge(next_element_id, first_node_of_body, "")
 
-
-            # Les sorties normales du corps mènent au nœud de re-test
             for exit_node in body_exit_nodes:
                 if exit_node not in self.terminal_nodes:
-                    self.add_edge(exit_node, retest_decision_id)
-        else: 
-            # Corps vide : init_var_id mène directement au retest_decision_id
-            self.add_edge(init_var_id, retest_decision_id)
-            # body_exit_nodes reste vide, ce qui est correct
+                    self.add_edge(exit_node, for_decision_id)
+        else:
+            self.add_edge(next_element_id, for_decision_id)
 
-        # Connexion de la deuxième décision (retest_decision_id)
-        self.add_edge(retest_decision_id, next_var_id, "Oui") # Si encore des éléments, prendre le suivant
-        self.add_edge(retest_decision_id, loop_exit_id, "Non")
-
-        # L'élément suivant (next_var_id) retourne au début du traitement du corps.
-        if first_node_of_body: # Si le corps n'était pas vide et qu'on a identifié son début
-            self.add_edge(next_var_id, first_node_of_body)
-        elif node.body : # Corps non vide, mais first_node_of_body non trouvé (ne devrait pas arriver si la logique est bonne)
-            print(f"Warning: Impossible de connecter next_var_id au début du corps de la\
-                   boucle for {iterator_variable_str}")
-            self.add_edge(next_var_id, retest_decision_id) # Fallback moins précis, crée une petite boucle sur le test
-        else: # Corps vide, next_var_id retourne directement au retest
-            self.add_edge(next_var_id, retest_decision_id)
-
-        # Le bloc else n'est pris que sur terminaison naturelle de la boucle.
-        # Les sorties du else rejoignent ensuite la jonction de sortie unique.
-        retest_non_target = loop_exit_id
+        non_target = loop_exit_id
         if node.orelse:
             nodes_before_orelse = {nid for nid, _ in self.nodes}
-            orelse_exit_nodes = self.visit_body(node.orelse, [retest_decision_id])
+            orelse_exit_nodes = self.visit_body(node.orelse, [for_decision_id])
             nodes_after_orelse = {nid for nid, _ in self.nodes}
             new_nodes_in_orelse = sorted(
                 list(nodes_after_orelse - nodes_before_orelse),
@@ -731,18 +1021,127 @@ class ControlFlowGraph:
 
             if new_nodes_in_orelse:
                 first_node_orelse = new_nodes_in_orelse[0]
-                retest_non_target = first_node_orelse
-                if (retest_decision_id, first_node_orelse, "") in self.edges:
-                    self.edges.remove((retest_decision_id, first_node_orelse, ""))
+                non_target = first_node_orelse
+                if (for_decision_id, first_node_orelse, "") in self.edges:
+                    self.edges.remove((for_decision_id, first_node_orelse, ""))
 
             for exit_node in orelse_exit_nodes:
                 if exit_node not in self.terminal_nodes:
                     self.add_edge(exit_node, loop_exit_id)
 
-        self.add_edge(retest_decision_id, retest_non_target, "Non")
-
-        self.loop_stack.pop() # Fin de la gestion de cette boucle.
+        self.add_edge(for_decision_id, non_target, "Non")
+        self.loop_stack.pop()
         return [loop_exit_id]
+
+    def _visit_for_empty_then_next(self, node: ast.For, parent_id: str, loop_context: Dict[str, Any]) -> List[str]:
+        """Rendu historique: test d'entrée puis distinction premier élément / élément suivant."""
+        loop_render_payload = {
+            "kind": "for_loop_control",
+            "iterator_variable": loop_context["iterator_variable"],
+            "iterable_display_name": loop_context["iterable_display_name"],
+            "iterable_kind_desc": loop_context["iterable_kind_desc"],
+            "inferred_element_type": loop_context["inferred_element_type"],
+            "for_loop_model": self._get_render_option("for_loop_model"),
+        }
+
+        entry_decision_label = (
+            f"Y a-t-il des {loop_context['decision_plural']}<br>dans {loop_context['iterable_reference_text']} ?"
+            if self._get_render_option("iterable_kind_visibility") == "show"
+            else f"{loop_context['iterable_display_name']} contient-il des {loop_context['decision_plural']} ?"
+        )
+        entry_decision_id = self.add_node(
+            entry_decision_label,
+            node_type="Decision",
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "entry_decision",
+            },
+        )
+        self.add_edge(parent_id, entry_decision_id)
+
+        first_element_id = self.add_node(
+            f"{loop_context['iterator_variable']} ← le premier élément{loop_context['assignment_type_suffix']}<br>de {loop_context['iterable_reference_text']}",
+            node_type="Process",
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "first_assignment",
+            },
+        )
+        self.add_edge(entry_decision_id, first_element_id, "Oui")
+
+        repeat_decision_id = self.add_node(
+            f"Encore {loop_context['decision_article']} {loop_context['decision_singular']}<br>dans {loop_context['iterable_reference_text']} ?",
+            node_type="Decision",
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "repeat_decision",
+            },
+        )
+
+        next_element_id = self.add_node(
+            f"{loop_context['iterator_variable']} ← l'élément suivant{loop_context['assignment_type_suffix']}<br>de {loop_context['iterable_reference_text']}",
+            node_type="Process",
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "next_assignment",
+            },
+        )
+        self.add_edge(repeat_decision_id, next_element_id, "Oui")
+
+        loop_exit_id = self.add_node(".", node_type="Junction")
+        self.loop_stack.append((repeat_decision_id, loop_exit_id, repeat_decision_id))
+
+        if node.body:
+            nodes_before_body = {nid for nid, _ in self.nodes}
+            body_exit_nodes = self.visit_body(node.body, [first_element_id])
+            nodes_after_body = {nid for nid, _ in self.nodes}
+            new_nodes_in_body = sorted(list(nodes_after_body - nodes_before_body), key=lambda x: int(x.replace("node", "")))
+            if new_nodes_in_body:
+                first_node_of_body = new_nodes_in_body[0]
+                self.add_edge(next_element_id, first_node_of_body)
+
+            for exit_node in body_exit_nodes:
+                if exit_node not in self.terminal_nodes:
+                    self.add_edge(exit_node, repeat_decision_id)
+        else:
+            self.add_edge(first_element_id, repeat_decision_id)
+            self.add_edge(next_element_id, repeat_decision_id)
+
+        non_target = loop_exit_id
+        if node.orelse:
+            nodes_before_orelse = {nid for nid, _ in self.nodes}
+            orelse_exit_nodes = self.visit_body(node.orelse, [entry_decision_id])
+            nodes_after_orelse = {nid for nid, _ in self.nodes}
+            new_nodes_in_orelse = sorted(
+                list(nodes_after_orelse - nodes_before_orelse),
+                key=lambda x: int(x.replace("node", ""))
+            )
+
+            if new_nodes_in_orelse:
+                first_node_orelse = new_nodes_in_orelse[0]
+                non_target = first_node_orelse
+                if (entry_decision_id, first_node_orelse, "") in self.edges:
+                    self.edges.remove((entry_decision_id, first_node_orelse, ""))
+
+            for exit_node in orelse_exit_nodes:
+                if exit_node not in self.terminal_nodes:
+                    self.add_edge(exit_node, loop_exit_id)
+
+        self.add_edge(entry_decision_id, non_target, "Non")
+        self.add_edge(repeat_decision_id, non_target, "Non")
+        self.loop_stack.pop()
+        return [loop_exit_id]
+
+    def visit_For(self, node: ast.For, parent_id: str) -> List[str]:
+        """Visite une boucle 'for' AST selon le modèle de rendu configuré."""
+        loop_context = self._build_for_loop_render_context(node)
+        if self._get_render_option("for_loop_model") == "empty_then_next":
+            return self._visit_for_empty_then_next(node, parent_id, loop_context)
+        return self._visit_for_single_has_next(node, parent_id, loop_context)
     
 
     def _visit_for_generic_iterable(self, node: ast.For, parent_id: str, iterator_variable_str: str) -> List[str]:
@@ -766,20 +1165,7 @@ class ControlFlowGraph:
     
     def visit_While(self, node: ast.While, parent_id: str) -> List[str]: 
         """Visite une boucle 'while' AST."""
-        if isinstance(node.test, ast.BoolOp) and len(node.test.values) > 1:
-            leading_values = node.test.values[:-1]
-            trailing_value = node.test.values[-1]
-            if len(leading_values) == 1:
-                first_line = ast.unparse(leading_values[0])
-                if isinstance(leading_values[0], ast.BoolOp):
-                    first_line = f"({first_line})"
-            else:
-                first_line = ast.unparse(ast.BoolOp(op=node.test.op, values=leading_values))
-            final_operator = "and" if isinstance(node.test.op, ast.And) else "or"
-            condition_text = f"{first_line}\n{final_operator} {ast.unparse(trailing_value)}"
-        else:
-            condition_text = ast.unparse(node.test)
-        condition_text = condition_text.replace('"', '"')
+        condition_text = self._format_condition_text(node.test, multiline_final_boolop=True).replace('"', '"')
         while_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node.test)
         self.add_edge(parent_id, while_decision_id)
 
@@ -1004,23 +1390,8 @@ class ControlFlowGraph:
         return operator_map.get(type(operator), f"{ast.unparse(operator)}=")
 
     def _get_assignment_display_parts(self, node: ast.stmt) -> Dict[str, str]:
-        """Construit les parties d'affichage d'une instruction d'affectation."""
-        if isinstance(node, ast.Assign):
-            target_text = ", ".join([ast.unparse(target).replace('"', '"') for target in node.targets])
-            operator_text = "←"
-            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
-        elif isinstance(node, ast.AugAssign):
-            target_text = ast.unparse(node.target).replace('"', '"')
-            operator_text = self._get_augassign_operator_text(node.op)
-            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
-        else:
-            raise TypeError(f"Instruction d'affectation non supportée: {type(node).__name__}")
-
-        return {
-            "target": target_text,
-            "operator": operator_text,
-            "value": value_text,
-        }
+        """Compatibilité: délègue vers le formateur générique de statements groupables."""
+        return self._get_statement_display_parts(node)
 
     def _store_assignment_metadata(self, target_nodes: Sequence[ast.expr], value_node: ast.AST):
         """Mémorise les types simples rencontrés lors des affectations."""
@@ -1056,31 +1427,20 @@ class ControlFlowGraph:
                         self.variable_assignments[var_name] = (ast.Call, "résultat d'appel de fonction")
 
     def _format_assignment_statement_label(self, node: ast.stmt) -> str:
-        """Formate une affectation simple ou augmentée pour le rendu Mermaid."""
-        assignment_parts = self._get_assignment_display_parts(node)
-        label_text = f"{assignment_parts['target']} {assignment_parts['operator']} {assignment_parts['value']}"
-
-        max_label_length = 60
-        if len(label_text) > max_label_length:
-            available_len_for_value = max_label_length - len(assignment_parts['target']) - len(assignment_parts['operator']) - 3
-            if available_len_for_value > 10:
-                value_text = assignment_parts['value']
-                short_value = value_text[:available_len_for_value] + "..." if len(value_text) > available_len_for_value else value_text
-                label_text = f"{assignment_parts['target']} {assignment_parts['operator']} {short_value}"
-            else:
-                label_text = label_text[:max_label_length - 3] + "..."
-
-        return label_text
+        """Compatibilité: délègue vers le formateur générique de statements groupables."""
+        return self._format_statement_label(node)
 
     def _visit_assignment_block(self, assign_nodes: Sequence[ast.stmt], parent_id: str) -> List[str]:
-        """Fusionne une suite d'affectations simples et augmentées en un rectangle multiline."""
+        """Fusionne une suite d'instructions groupables en un bloc visuel compact."""
         label_lines: List[str] = []
         render_rows: List[Dict[str, str]] = []
         for assign_node in assign_nodes:
             if isinstance(assign_node, ast.Assign):
                 self._store_assignment_metadata(assign_node.targets, assign_node.value)
-            label_lines.append(self._format_assignment_statement_label(assign_node))
-            render_rows.append(self._get_assignment_display_parts(assign_node))
+            elif isinstance(assign_node, ast.AnnAssign) and assign_node.value is not None:
+                self._store_assignment_metadata([assign_node.target], assign_node.value)
+            label_lines.append(self._format_statement_label(assign_node))
+            render_rows.append(self._get_statement_display_parts(assign_node))
 
         assign_block_id = self.add_node(
             "\n".join(label_lines),
@@ -1088,7 +1448,8 @@ class ControlFlowGraph:
             source_start_node=assign_nodes[0],
             source_end_node=assign_nodes[-1],
             render_payload={
-                "kind": "assignment_block",
+                "kind": "statement_block",
+                "layout_mode": self._get_render_option("assignment_grouping_mode"),
                 "rows": render_rows,
             },
         )
@@ -1099,14 +1460,23 @@ class ControlFlowGraph:
         """Visite une instruction d'assignation AST."""
         value_node = node.value
         self._store_assignment_metadata(node.targets, value_node)
-        label_text = self._format_assignment_statement_label(node)
+        label_text = self._format_statement_label(node)
         assign_node_id = self.add_node(label_text, node_type="Process", source_start_node=node)
         self.add_edge(parent_id, assign_node_id)
         return [assign_node_id]
 
+    def visit_AnnAssign(self, node: ast.AnnAssign, parent_id: str) -> List[str]:
+        """Visite une instruction d'assignation annotée AST."""
+        if node.value is not None:
+            self._store_assignment_metadata([node.target], node.value)
+        label_text = self._format_statement_label(node)
+        annassign_node_id = self.add_node(label_text, node_type="Process", source_start_node=node)
+        self.add_edge(parent_id, annassign_node_id)
+        return [annassign_node_id]
+
     def visit_AugAssign(self, node: ast.AugAssign, parent_id: str) -> List[str]:
         """Visite une instruction d'assignation augmentée AST."""
-        label_text = self._format_assignment_statement_label(node)
+        label_text = self._format_statement_label(node)
         augassign_node_id = self.add_node(label_text, node_type="Process", source_start_node=node)
         self.add_edge(parent_id, augassign_node_id)
         return [augassign_node_id]
@@ -1119,33 +1489,9 @@ class ControlFlowGraph:
 
     def visit_Call(self, node: ast.Call, parent_id: str) -> List[str]:
         """Visite un appel de fonction AST."""
-        func_name_str = ast.unparse(node.func).replace('"', '#quot;') # Sécuriser le nom de la fonction.
-        
-        # Arguments positionnels.
-        args_list_str = [ast.unparse(a).replace('"', '#quot;') for a in node.args]
-        
-        # Arguments nommés (keywords).
-        double_quote_char = '"' # Pour éviter les problèmes de backslash dans les f-strings.
-        kwargs_list_str = [
-            f'{k.arg}={ast.unparse(k.value).replace(double_quote_char, "#quot;")}'
-            for k in node.keywords
-        ]
-        
-        all_args_concatenated_str = ", ".join(args_list_str + kwargs_list_str)
-        
-        # Tronquer la chaîne des arguments si elle est trop longue.
-        max_args_display_length = 60 
-        if len(all_args_concatenated_str) > max_args_display_length: 
-            all_args_concatenated_str = all_args_concatenated_str[:max_args_display_length-3] + "..."
-        
-        node_type = "Process" # Type par défaut.
-        label_text = f"{func_name_str}({all_args_concatenated_str})" # Étiquette de base.
-
-        # Style spécifique pour les opérations d'I/O.
-        if func_name_str in ["print", "input"]:
-            node_type = "IoOperation"
-        else: # Pour les autres appels, on peut ajouter "Appel:" pour les distinguer.
-            label_text = f"Appel: {label_text}"
+        call_display = self._get_call_display_parts(node)
+        node_type = call_display["node_type"]
+        label_text = call_display["label_text"]
 
         call_node_id = self.add_node(label_text, node_type=node_type, source_start_node=node)
         self.add_edge(parent_id, call_node_id)
@@ -1312,6 +1658,19 @@ class ControlFlowGraph:
         return iterable_kind_desc, elements_type_desc_raw, iterable_display_name, \
                article_indefini_element, article_defini_element
 
+    def _get_iterable_reference_text(self, iterable_kind_desc: str, iterable_display_name: str) -> str:
+        """Construit le texte de référence de l'itérable selon la visibilité choisie."""
+        if self._get_render_option("iterable_kind_visibility") != "show":
+            return iterable_display_name
+
+        if iterable_kind_desc.startswith("le résultat de "):
+            return iterable_kind_desc
+
+        if iterable_kind_desc and iterable_kind_desc != "l'itérable":
+            return f"{iterable_kind_desc} {iterable_display_name}"
+
+        return iterable_display_name
+
 
     def _simplify_junctions(self) -> Tuple[List[Tuple[str, str]], Set[Tuple[str, str, str]]]:
         """
@@ -1371,13 +1730,47 @@ class ControlFlowGraph:
             render_payload = self.node_render_payloads.get(node_id, {})
             rows = render_payload.get("rows", [])
             if rows:
+                layout_mode = render_payload.get("layout_mode", "merged_block")
                 rendered_rows: List[str] = []
                 for row in rows:
+                    if row.get("kind") == "expression":
+                        rendered_text = html.escape(row.get("text", ""), quote=False)
+                        if layout_mode == "stacked_compact":
+                            rendered_rows.append(
+                                "<tr>"
+                                f"<td colspan='3' style='border: 1px solid currentColor; padding: 0.25em 0.6em; text-align: left;'>{rendered_text}</td>"
+                                "</tr>"
+                            )
+                        else:
+                            rendered_rows.append(
+                                "<tr>"
+                                f"<td colspan='3' style='text-align: left;'>{rendered_text}</td>"
+                                "</tr>"
+                            )
+                        continue
+
+                    target_text = row.get("target", "")
+                    annotation_text = row.get("annotation", "")
+                    if annotation_text:
+                        target_text = f"{target_text} : {annotation_text}"
+
+                    if layout_mode == "stacked_compact":
+                        rendered_rows.append(
+                            "<tr>"
+                            f"<td colspan='3' style='border: 1px solid currentColor; padding: 0.25em 0.6em; text-align: left;'>"
+                            f"{html.escape(target_text, quote=False)}"
+                            f" {html.escape(row.get('operator', ''), quote=False)}"
+                            f" {html.escape(row.get('value', ''), quote=False)}"
+                            "</td>"
+                            "</tr>"
+                        )
+                        continue
+
                     rendered_rows.append(
                         "<tr>"
-                        f"<td style='text-align: right; padding-right: 0.45em;'>{html.escape(row['target'], quote=False)}</td>"
-                        f"<td style='text-align: center; padding: 0 0.15em; min-width: 2.4em;'>{html.escape(row['operator'], quote=False)}</td>"
-                        f"<td style='text-align: left; padding-left: 0.45em;'>{html.escape(row['value'], quote=False)}</td>"
+                        f"<td style='text-align: right; padding-right: 0.45em;'>{html.escape(target_text, quote=False)}</td>"
+                        f"<td style='text-align: center; padding: 0 0.15em; min-width: 2.4em;'>{html.escape(row.get('operator', ''), quote=False)}</td>"
+                        f"<td style='text-align: left; padding-left: 0.45em;'>{html.escape(row.get('value', ''), quote=False)}</td>"
                         "</tr>"
                     )
                 return (
