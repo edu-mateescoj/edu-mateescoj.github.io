@@ -339,17 +339,38 @@ function bindFlowchartSelectionHandlers(targetDiv) {
     }
 
     targetDiv.__flowchartClickHandler = function(event) {
-        const clickedNodeGroup = event.target.closest('g.node[data-node-id]');
+        const eventTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+        if (!eventTarget) return;
+
+        const clickedNodeGroup = eventTarget.closest('g.node[data-node-id]');
 
         if (clickedNodeGroup) {
-            const sourceSpan = {
-                editorLine: Number.parseInt(clickedNodeGroup.dataset.editorLine || '', 10),
-                editorEndLine: Number.parseInt(clickedNodeGroup.dataset.editorEndLine || '', 10),
-                lineno: Number.parseInt(clickedNodeGroup.dataset.lineno || '', 10),
-                end_lineno: Number.parseInt(clickedNodeGroup.dataset.endLineno || '', 10),
-                col_offset: Number.parseInt(clickedNodeGroup.dataset.colOffset || '', 10),
-                end_col_offset: Number.parseInt(clickedNodeGroup.dataset.endColOffset || '', 10),
-            };
+            const clickedRowElement = eventTarget.closest('[data-source-lineno], [data-source-end-lineno], [data-source-col-offset], [data-source-end-col-offset]');
+            const clickedRowIsInsideNode = !!clickedRowElement;
+
+            const sourceSpan = clickedRowIsInsideNode
+                ? {
+                    lineno: Number.parseInt(clickedRowElement.dataset.sourceLineno || '', 10),
+                    end_lineno: Number.parseInt(clickedRowElement.dataset.sourceEndLineno || '', 10),
+                    col_offset: Number.parseInt(clickedRowElement.dataset.sourceColOffset || '', 10),
+                    end_col_offset: Number.parseInt(clickedRowElement.dataset.sourceEndColOffset || '', 10),
+                  }
+                : {
+                    editorLine: Number.parseInt(clickedNodeGroup.dataset.editorLine || '', 10),
+                    editorEndLine: Number.parseInt(clickedNodeGroup.dataset.editorEndLine || '', 10),
+                    lineno: Number.parseInt(clickedNodeGroup.dataset.lineno || '', 10),
+                    end_lineno: Number.parseInt(clickedNodeGroup.dataset.endLineno || '', 10),
+                    col_offset: Number.parseInt(clickedNodeGroup.dataset.colOffset || '', 10),
+                    end_col_offset: Number.parseInt(clickedNodeGroup.dataset.endColOffset || '', 10),
+                  };
+
+            if (clickedRowIsInsideNode) {
+                sourceSpan.editorLine = Number.isInteger(sourceSpan.lineno) ? Math.max(0, sourceSpan.lineno - 1) : null;
+                sourceSpan.editorEndLine = Number.isInteger(sourceSpan.end_lineno)
+                    ? Math.max(0, sourceSpan.end_lineno - 1)
+                    : sourceSpan.editorLine;
+            }
+
             const hasExplicitSourceSpan = [
                 sourceSpan.editorLine,
                 sourceSpan.editorEndLine,
@@ -368,7 +389,7 @@ function bindFlowchartSelectionHandlers(targetDiv) {
             return;
         }
 
-        if (event.target.closest('svg') || event.target === targetDiv) {
+        if (eventTarget.closest('svg') || eventTarget === targetDiv) {
             clearFlowchartNodeSelection(targetDiv);
         }
     };

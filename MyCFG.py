@@ -7,11 +7,12 @@ DEFAULT_RENDER_CONFIG: Dict[str, str] = {
     "source_annotation_visibility": "show",
     "missing_annotation_policy": "keep_unannotated",
     "conflicting_annotation_policy": "keep_source",
+    "assignment_operator_mode": "unicode_arrow",
     "assignment_grouping_mode": "merged_block",
     "expression_grouping_policy": "keep_separate",
     "boolean_lexicon": "python",
     "comparison_glyph_mode": "ascii",
-    "equality_mode": "double_equals",
+    "equality_mode": "single_equals",
     "membership_mode": "python",
     "for_loop_model": "single_has_next",
     "iterable_kind_visibility": "hidden",
@@ -70,11 +71,29 @@ class ControlFlowGraph:
             else:
                 normalized[key] = default_value
 
+        # Evite l'ambiguïté visuelle entre affectation et test d'égalité quand
+        # les deux seraient affichés avec le même signe '='.
+        if (
+            normalized["assignment_operator_mode"] == "equals"
+            and normalized["equality_mode"] == "single_equals"
+        ):
+            normalized["equality_mode"] = "double_equals"
+
         return normalized
 
     def _get_render_option(self, key: str) -> str:
         """Retourne une option de rendu normalisée."""
         return self.render_config.get(key, DEFAULT_RENDER_CONFIG[key])
+
+    def _get_simple_assignment_operator_text(self) -> str:
+        """Retourne le symbole d'affectation simple selon la configuration de rendu."""
+        if self._get_render_option("assignment_operator_mode") == "equals":
+            return "="
+        return "←"
+
+    def _compose_multiline_label(self, *lines: str) -> str:
+        """Assemble plusieurs lignes de label sans post-traitement textuel fragile."""
+        return "\n".join(line.strip() for line in lines if isinstance(line, str) and line.strip())
 
     def _is_groupable_statement(self, node: ast.stmt, grouping_mode: Optional[str] = None) -> bool:
         """Indique si une instruction peut participer à un bloc visuel compact."""
@@ -146,10 +165,10 @@ class ControlFlowGraph:
     def _get_call_display_parts(self, node: ast.Call) -> Dict[str, str]:
         """Construit les parties d'affichage d'un appel de fonction ou méthode."""
         func_name_str = ast.unparse(node.func).replace('"', '#quot;')
-        args_list_str = [ast.unparse(arg).replace('"', '#quot;') for arg in node.args]
+        args_list_str = [self._format_display_expression(arg).replace('"', '#quot;') for arg in node.args]
         double_quote_char = '"'
         kwargs_list_str = [
-            f"{keyword.arg}={ast.unparse(keyword.value).replace(double_quote_char, '#quot;')}"
+            f"{keyword.arg}={self._format_display_expression(keyword.value).replace(double_quote_char, '#quot;')}"
             for keyword in node.keywords
         ]
         all_args_concatenated_str = ", ".join(args_list_str + kwargs_list_str)
@@ -174,8 +193,8 @@ class ControlFlowGraph:
         """Construit les parties d'affichage d'une instruction groupable."""
         if isinstance(node, ast.Assign):
             target_text = ", ".join([ast.unparse(target).replace('"', '"') for target in node.targets])
-            operator_text = "←"
-            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
+            operator_text = self._get_simple_assignment_operator_text()
+            value_text = self._format_display_expression(node.value).replace('"', '"') if node.value else ""
             annotation_text = self._get_visible_annotation_text(node) or ""
             return {
                 "kind": "assignment",
@@ -187,8 +206,8 @@ class ControlFlowGraph:
 
         if isinstance(node, ast.AnnAssign):
             target_text = ast.unparse(node.target).replace('"', '"')
-            operator_text = "←" if node.value is not None else ""
-            value_text = ast.unparse(node.value).replace('"', '"') if node.value is not None else ""
+            operator_text = self._get_simple_assignment_operator_text() if node.value is not None else ""
+            value_text = self._format_display_expression(node.value).replace('"', '"') if node.value is not None else ""
             annotation_text = self._get_visible_annotation_text(node) or ""
             return {
                 "kind": "assignment",
@@ -201,7 +220,7 @@ class ControlFlowGraph:
         if isinstance(node, ast.AugAssign):
             target_text = ast.unparse(node.target).replace('"', '"')
             operator_text = self._get_augassign_operator_text(node.op)
-            value_text = ast.unparse(node.value).replace('"', '"') if node.value else ""
+            value_text = self._format_display_expression(node.value).replace('"', '"') if node.value else ""
             annotation_text = self._get_visible_annotation_text(node) or ""
             return {
                 "kind": "assignment",
@@ -216,7 +235,7 @@ class ControlFlowGraph:
                 call_display = self._get_call_display_parts(node.value)
                 expression_text = call_display["label_text"]
             else:
-                expression_text = ast.unparse(node.value).replace('"', '"')
+                expression_text = self._format_display_expression(node.value).replace('"', '"')
             return {
                 "kind": "expression",
                 "text": expression_text,
@@ -315,6 +334,16 @@ class ControlFlowGraph:
 
         return ast.unparse(operator)
 
+    def _format_display_expression(self, node: ast.AST) -> str:
+        """Formate une expression affichée hors losange en respectant les options de rendu."""
+        if isinstance(node, (ast.BoolOp, ast.Compare)):
+            return self._format_condition_expression(node)
+
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return self._format_condition_expression(node)
+
+        return ast.unparse(node)
+
     def _format_condition_expression(self, node: ast.AST) -> str:
         """Formate récursivement une expression booléenne/comparative pour les conditions."""
         if isinstance(node, ast.BoolOp):
@@ -342,9 +371,39 @@ class ControlFlowGraph:
 
         return ast.unparse(node)
 
+    def _format_multiline_compare_text(self, node: ast.Compare) -> Optional[str]:
+        """Découpe une comparaison simple quand le membre droit est visiblement encombrant."""
+        if len(node.ops) != 1 or len(node.comparators) != 1:
+            return None
+
+        left_text = self._format_condition_expression(node.left)
+        operator = node.ops[0]
+        operator_text = self._get_compare_operator_text(operator)
+        comparator_node = node.comparators[0]
+        comparator_text = self._format_condition_expression(comparator_node)
+        full_text = f"{left_text} {operator_text} {comparator_text}"
+
+        comparator_is_bulky = isinstance(
+            comparator_node,
+            (ast.List, ast.Tuple, ast.Set, ast.Dict, ast.Call, ast.Subscript, ast.BinOp, ast.BoolOp, ast.IfExp),
+        )
+        if not comparator_is_bulky and len(comparator_text) <= 18:
+            return None
+
+        if len(full_text) <= 23:
+            return None
+
+        return self._compose_multiline_label(f"{left_text} {operator_text}", comparator_text)
+
     def _format_condition_text(self, node: ast.AST, multiline_final_boolop: bool = False) -> str:
         """Formate le texte d'une condition en tenant compte du lexique configuré."""
-        if multiline_final_boolop and isinstance(node, ast.BoolOp) and len(node.values) > 1:
+        if isinstance(node, ast.BoolOp) and len(node.values) > 1:
+            single_line_text = self._format_condition_expression(node)
+            should_split_final_boolop = multiline_final_boolop or len(single_line_text) > 28
+
+            if not should_split_final_boolop:
+                return single_line_text
+
             leading_values = node.values[:-1]
             trailing_value = node.values[-1]
             if len(leading_values) == 1:
@@ -356,6 +415,11 @@ class ControlFlowGraph:
 
             final_operator = self._get_boolean_operator_text(node.op)
             return f"{first_line}\n{final_operator} {self._format_condition_expression(trailing_value)}"
+
+        if isinstance(node, ast.Compare):
+            multiline_compare_text = self._format_multiline_compare_text(node)
+            if multiline_compare_text:
+                return multiline_compare_text
 
         return self._format_condition_expression(node)
 
@@ -454,19 +518,8 @@ class ControlFlowGraph:
                 return self._normalize_assignment_entry_type(assigned_ast_type, assigned_value_or_desc)
             return "unknown"
 
-        if isinstance(value_node, ast.Call) and isinstance(value_node.func, ast.Name):
-            builtin_map = {
-                "int": "int",
-                "float": "float",
-                "str": "str",
-                "bool": "bool",
-                "list": "list",
-                "len": "int",
-                "input": "str",
-                "ord": "int",
-                "chr": "str",
-            }
-            return builtin_map.get(value_node.func.id, "unknown")
+        if isinstance(value_node, ast.Call):
+            return self._infer_type_from_call_node(value_node)
 
         if isinstance(value_node, ast.Compare):
             return "bool"
@@ -503,6 +556,31 @@ class ControlFlowGraph:
             body_type = self._infer_type_from_value_node(value_node.body)
             else_type = self._infer_type_from_value_node(value_node.orelse)
             return body_type if body_type == else_type else "unknown"
+
+        return "unknown"
+
+    def _infer_type_from_call_node(self, call_node: ast.Call) -> str:
+        """Infère le type simple renvoyé par un appel connu."""
+        if isinstance(call_node.func, ast.Name):
+            builtin_map = {
+                "int": "int",
+                "float": "float",
+                "str": "str",
+                "bool": "bool",
+                "list": "list",
+                "len": "int",
+                "input": "str",
+                "ord": "int",
+                "chr": "str",
+            }
+            return builtin_map.get(call_node.func.id, "unknown")
+
+        if isinstance(call_node.func, ast.Attribute):
+            receiver_type = self._infer_type_from_value_node(call_node.func.value)
+            method_name = call_node.func.attr
+
+            if receiver_type == "str" and method_name == "replace":
+                return "str"
 
         return "unknown"
 
@@ -918,19 +996,53 @@ class ControlFlowGraph:
             "élément": "éléments",
         }
 
-        decision_singular = singular_map.get(elements_type_desc_raw, "élément") if show_element_type else "élément"
-        decision_plural = plural_map.get(elements_type_desc_raw, "éléments") if show_element_type else "éléments"
-        assignment_type_suffix = ""
-        if show_element_type and elements_type_desc_raw and elements_type_desc_raw != "élément":
-            suffix_text = "mixte" if elements_type_desc_raw == "élément mixte" else elements_type_desc_raw
-            assignment_type_suffix = f" ({suffix_text})"
+        first_assignment_map = {
+            "caractère": "premier caractère",
+            "nombre": "premier nombre",
+            "chaîne": "première chaîne",
+            "booléen": "premier booléen",
+            "clé": "première clé",
+            "variable": "première variable",
+            "élément mixte": "premier élément mixte",
+            "élément": "premier élément",
+        }
+        next_assignment_map = {
+            "caractère": "caractère suivant",
+            "nombre": "nombre suivant",
+            "chaîne": "chaîne suivante",
+            "booléen": "booléen suivant",
+            "clé": "clé suivante",
+            "variable": "variable suivante",
+            "élément mixte": "élément mixte suivant",
+            "élément": "élément suivant",
+        }
+
+        visible_element_key = elements_type_desc_raw if show_element_type else "élément"
+        decision_singular = singular_map.get(visible_element_key, "élément")
+        decision_plural = plural_map.get(visible_element_key, "éléments")
+        first_assignment_text = first_assignment_map.get(visible_element_key, "premier élément")
+        next_assignment_text = next_assignment_map.get(visible_element_key, "élément suivant")
 
         return {
             "decision_article": article_indefini_element if show_element_type else "un",
             "decision_singular": decision_singular,
             "decision_plural": decision_plural,
-            "assignment_type_suffix": assignment_type_suffix,
+            "entry_decision_text": f"Au moins {article_indefini_element if show_element_type else 'un'} {decision_singular} à parcourir",
+            "repeat_decision_text": f"Encore {article_indefini_element if show_element_type else 'un'} {decision_singular} à parcourir",
+            "first_assignment_text": first_assignment_text,
+            "next_assignment_text": next_assignment_text,
         }
+
+    def _build_for_decision_label(self, decision_text: str, iterable_reference_text: str) -> str:
+        """Construit un losange de boucle for court sur deux lignes."""
+        return self._compose_multiline_label(decision_text, f"dans {iterable_reference_text} ?")
+
+    def _build_for_assignment_label(self, iterator_variable: str, assignment_text: str, iterable_reference_text: str) -> str:
+        """Construit un rectangle d'affectation d'itérateur compact sur deux lignes."""
+        return self._compose_multiline_label(
+            f"{iterator_variable} {self._get_simple_assignment_operator_text()} {assignment_text}",
+            f"de {iterable_reference_text}",
+        )
 
     def _build_for_loop_render_context(self, node: ast.For) -> Dict[str, Any]:
         """Construit les informations partagées entre les variantes de rendu de boucle for."""
@@ -949,7 +1061,10 @@ class ControlFlowGraph:
             "decision_article": element_display["decision_article"],
             "decision_singular": element_display["decision_singular"],
             "decision_plural": element_display["decision_plural"],
-            "assignment_type_suffix": element_display["assignment_type_suffix"],
+            "entry_decision_text": element_display["entry_decision_text"],
+            "repeat_decision_text": element_display["repeat_decision_text"],
+            "first_assignment_text": element_display["first_assignment_text"],
+            "next_assignment_text": element_display["next_assignment_text"],
         }
 
     def _visit_for_single_has_next(self, node: ast.For, parent_id: str, loop_context: Dict[str, Any]) -> List[str]:
@@ -964,7 +1079,10 @@ class ControlFlowGraph:
         }
 
         for_decision_id = self.add_node(
-            f"Reste-t-il {loop_context['decision_article']} {loop_context['decision_singular']}<br>à parcourir dans {loop_context['iterable_reference_text']} ?",
+            self._build_for_decision_label(
+                loop_context["repeat_decision_text"],
+                loop_context["iterable_reference_text"],
+            ),
             node_type="Decision",
             source_span=loop_context["for_header_span"],
             render_payload={
@@ -975,7 +1093,11 @@ class ControlFlowGraph:
         self.add_edge(parent_id, for_decision_id)
 
         next_element_id = self.add_node(
-            f"{loop_context['iterator_variable']} ← prochain élément{loop_context['assignment_type_suffix']}<br>de {loop_context['iterable_reference_text']}",
+            self._build_for_assignment_label(
+                loop_context["iterator_variable"],
+                loop_context["next_assignment_text"],
+                loop_context["iterable_reference_text"],
+            ),
             node_type="Process",
             source_span=loop_context["for_header_span"],
             render_payload={
@@ -1044,10 +1166,9 @@ class ControlFlowGraph:
             "for_loop_model": self._get_render_option("for_loop_model"),
         }
 
-        entry_decision_label = (
-            f"Y a-t-il des {loop_context['decision_plural']}<br>dans {loop_context['iterable_reference_text']} ?"
-            if self._get_render_option("iterable_kind_visibility") == "show"
-            else f"{loop_context['iterable_display_name']} contient-il des {loop_context['decision_plural']} ?"
+        entry_decision_label = self._build_for_decision_label(
+            loop_context["entry_decision_text"],
+            loop_context["iterable_reference_text"],
         )
         entry_decision_id = self.add_node(
             entry_decision_label,
@@ -1061,7 +1182,11 @@ class ControlFlowGraph:
         self.add_edge(parent_id, entry_decision_id)
 
         first_element_id = self.add_node(
-            f"{loop_context['iterator_variable']} ← le premier élément{loop_context['assignment_type_suffix']}<br>de {loop_context['iterable_reference_text']}",
+            self._build_for_assignment_label(
+                loop_context["iterator_variable"],
+                loop_context["first_assignment_text"],
+                loop_context["iterable_reference_text"],
+            ),
             node_type="Process",
             source_span=loop_context["for_header_span"],
             render_payload={
@@ -1072,7 +1197,10 @@ class ControlFlowGraph:
         self.add_edge(entry_decision_id, first_element_id, "Oui")
 
         repeat_decision_id = self.add_node(
-            f"Encore {loop_context['decision_article']} {loop_context['decision_singular']}<br>dans {loop_context['iterable_reference_text']} ?",
+            self._build_for_decision_label(
+                loop_context["repeat_decision_text"],
+                loop_context["iterable_reference_text"],
+            ),
             node_type="Decision",
             source_span=loop_context["for_header_span"],
             render_payload={
@@ -1082,7 +1210,11 @@ class ControlFlowGraph:
         )
 
         next_element_id = self.add_node(
-            f"{loop_context['iterator_variable']} ← l'élément suivant{loop_context['assignment_type_suffix']}<br>de {loop_context['iterable_reference_text']}",
+            self._build_for_assignment_label(
+                loop_context["iterator_variable"],
+                loop_context["next_assignment_text"],
+                loop_context["iterable_reference_text"],
+            ),
             node_type="Process",
             source_span=loop_context["for_header_span"],
             render_payload={
@@ -1424,7 +1556,14 @@ class ControlFlowGraph:
                         else:
                             self.variable_assignments[var_name] = (ast.Call, f"résultat de {called_func_name}()")
                     else:
-                        self.variable_assignments[var_name] = (ast.Call, "résultat d'appel de fonction")
+                        inferred_type = self._infer_type_from_value_node(value_node)
+                        if inferred_type != "unknown":
+                            self.variable_assignments[var_name] = (assigned_value_type_ast, inferred_type)
+                        else:
+                            self.variable_assignments[var_name] = (ast.Call, "résultat d'appel de fonction")
+                else:
+                    inferred_type = self._infer_type_from_value_node(value_node)
+                    self.variable_assignments[var_name] = (assigned_value_type_ast, inferred_type)
 
     def _format_assignment_statement_label(self, node: ast.stmt) -> str:
         """Compatibilité: délègue vers le formateur générique de statements groupables."""
@@ -1440,7 +1579,12 @@ class ControlFlowGraph:
             elif isinstance(assign_node, ast.AnnAssign) and assign_node.value is not None:
                 self._store_assignment_metadata([assign_node.target], assign_node.value)
             label_lines.append(self._format_statement_label(assign_node))
-            render_rows.append(self._get_statement_display_parts(assign_node))
+            row_parts = dict(self._get_statement_display_parts(assign_node))
+            row_parts["source_span"] = self._build_source_span(
+                source_start_node=assign_node,
+                source_end_node=assign_node,
+            )
+            render_rows.append(row_parts)
 
         assign_block_id = self.add_node(
             "\n".join(label_lines),
@@ -1730,21 +1874,43 @@ class ControlFlowGraph:
             render_payload = self.node_render_payloads.get(node_id, {})
             rows = render_payload.get("rows", [])
             if rows:
+                def _build_row_source_attrs(row_payload: Dict[str, Any]) -> str:
+                    source_span = row_payload.get("source_span")
+                    if not isinstance(source_span, dict):
+                        return ""
+
+                    source_attrs: List[str] = []
+                    for attr_name, span_key in (
+                        ("data-source-lineno", "lineno"),
+                        ("data-source-end-lineno", "end_lineno"),
+                        ("data-source-col-offset", "col_offset"),
+                        ("data-source-end-col-offset", "end_col_offset"),
+                    ):
+                        value = source_span.get(span_key)
+                        if isinstance(value, int):
+                            source_attrs.append(f"{attr_name}='{value}'")
+
+                    if not source_attrs:
+                        return ""
+                    return " " + " ".join(source_attrs)
+
                 layout_mode = render_payload.get("layout_mode", "merged_block")
                 rendered_rows: List[str] = []
                 for row in rows:
+                    row_source_attrs = _build_row_source_attrs(row)
+                    cell_source_attrs = row_source_attrs
                     if row.get("kind") == "expression":
                         rendered_text = html.escape(row.get("text", ""), quote=False)
                         if layout_mode == "stacked_compact":
                             rendered_rows.append(
-                                "<tr>"
-                                f"<td colspan='3' style='border: 1px solid currentColor; padding: 0.25em 0.6em; text-align: left;'>{rendered_text}</td>"
+                                f"<tr{row_source_attrs}>"
+                                f"<td colspan='3'{cell_source_attrs} style='border: 1px solid currentColor; padding: 0.25em 0.6em; text-align: left;'>{rendered_text}</td>"
                                 "</tr>"
                             )
                         else:
                             rendered_rows.append(
-                                "<tr>"
-                                f"<td colspan='3' style='text-align: left;'>{rendered_text}</td>"
+                                f"<tr{row_source_attrs}>"
+                                f"<td colspan='3'{cell_source_attrs} style='text-align: left;'>{rendered_text}</td>"
                                 "</tr>"
                             )
                         continue
@@ -1756,8 +1922,8 @@ class ControlFlowGraph:
 
                     if layout_mode == "stacked_compact":
                         rendered_rows.append(
-                            "<tr>"
-                            f"<td colspan='3' style='border: 1px solid currentColor; padding: 0.25em 0.6em; text-align: left;'>"
+                            f"<tr{row_source_attrs}>"
+                            f"<td colspan='3'{cell_source_attrs} style='border: 1px solid currentColor; padding: 0.25em 0.6em; text-align: left;'>"
                             f"{html.escape(target_text, quote=False)}"
                             f" {html.escape(row.get('operator', ''), quote=False)}"
                             f" {html.escape(row.get('value', ''), quote=False)}"
@@ -1767,10 +1933,10 @@ class ControlFlowGraph:
                         continue
 
                     rendered_rows.append(
-                        "<tr>"
-                        f"<td style='text-align: right; padding-right: 0.45em;'>{html.escape(target_text, quote=False)}</td>"
-                        f"<td style='text-align: center; padding: 0 0.15em; min-width: 2.4em;'>{html.escape(row.get('operator', ''), quote=False)}</td>"
-                        f"<td style='text-align: left; padding-left: 0.45em;'>{html.escape(row.get('value', ''), quote=False)}</td>"
+                        f"<tr{row_source_attrs}>"
+                        f"<td{cell_source_attrs} style='text-align: right; padding-right: 0.45em;'>{html.escape(target_text, quote=False)}</td>"
+                        f"<td{cell_source_attrs} style='text-align: center; padding: 0 0.15em; min-width: 2.4em;'>{html.escape(row.get('operator', ''), quote=False)}</td>"
+                        f"<td{cell_source_attrs} style='text-align: left; padding-left: 0.45em;'>{html.escape(row.get('value', ''), quote=False)}</td>"
                         "</tr>"
                     )
                 return (

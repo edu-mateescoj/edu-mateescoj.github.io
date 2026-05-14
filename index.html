@@ -438,6 +438,13 @@
                             </div>
 
                             <div class="col-lg-4 col-md-6">
+                                <label for="render-assignment-operator-mode" class="form-label small mb-1">Traduction de l'affectation</label>
+                                <select id="render-assignment-operator-mode" class="form-select form-select-sm">
+                                    <option value="unicode_arrow" selected>Flèche unicode ←</option>
+                                    <option value="equals">Signe =</option>
+                                </select>
+                            </div>
+                            <div class="col-lg-4 col-md-6">
                                 <label for="render-assignment-grouping-mode" class="form-label small mb-1">Affectations / expressions</label>
                                 <select id="render-assignment-grouping-mode" class="form-select form-select-sm">
                                     <option value="merged_block" selected>Bloc multi-ligne fusionné</option>
@@ -473,8 +480,8 @@
                             <div class="col-lg-4 col-md-6">
                                 <label for="render-equality-mode" class="form-label small mb-1">Égalité en condition</label>
                                 <select id="render-equality-mode" class="form-select form-select-sm">
-                                    <option value="double_equals" selected>==</option>
-                                    <option value="single_equals">=</option>
+                                    <option value="double_equals">==</option>
+                                    <option value="single_equals" selected>=</option>
                                 </select>
                             </div>
                             <div class="col-lg-4 col-md-6">

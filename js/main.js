@@ -1236,26 +1236,63 @@ function clearConsole() {
     }
 }
 
+function normalizeFlowchartRenderOptions(renderOptions) {
+    const normalizedOptions = { ...renderOptions };
+
+    if (
+        normalizedOptions.assignment_operator_mode === 'equals' &&
+        normalizedOptions.equality_mode === 'single_equals'
+    ) {
+        normalizedOptions.equality_mode = 'double_equals';
+    }
+
+    return normalizedOptions;
+}
+
+function syncFlowchartEqualityOptionUI() {
+    const assignmentOperatorSelect = document.getElementById('render-assignment-operator-mode');
+    const equalityModeSelect = document.getElementById('render-equality-mode');
+    if (!assignmentOperatorSelect || !equalityModeSelect) {
+        return;
+    }
+
+    const singleEqualsOption = equalityModeSelect.querySelector('option[value="single_equals"]');
+    const assignmentUsesEquals = assignmentOperatorSelect.value === 'equals';
+
+    if (singleEqualsOption) {
+        singleEqualsOption.disabled = assignmentUsesEquals;
+    }
+
+    if (assignmentUsesEquals && equalityModeSelect.value === 'single_equals') {
+        equalityModeSelect.value = 'double_equals';
+        equalityModeSelect.dataset.autoAdjustedFromAssignment = 'true';
+    } else if (!assignmentUsesEquals && equalityModeSelect.dataset.autoAdjustedFromAssignment === 'true') {
+        equalityModeSelect.value = 'single_equals';
+        delete equalityModeSelect.dataset.autoAdjustedFromAssignment;
+    }
+}
+
 window.collectFlowchartRenderOptions = function() {
     const getSelectValue = (id, defaultValue) => {
         const selectElement = document.getElementById(id);
         return selectElement ? selectElement.value : defaultValue;
     };
 
-    return {
+    return normalizeFlowchartRenderOptions({
         source_annotation_visibility: getSelectValue('render-source-annotation-visibility', 'show'),
         missing_annotation_policy: getSelectValue('render-missing-annotation-policy', 'keep_unannotated'),
         conflicting_annotation_policy: getSelectValue('render-conflicting-annotation-policy', 'keep_source'),
+        assignment_operator_mode: getSelectValue('render-assignment-operator-mode', 'unicode_arrow'),
         assignment_grouping_mode: getSelectValue('render-assignment-grouping-mode', 'merged_block'),
         expression_grouping_policy: getSelectValue('render-expression-grouping-policy', 'keep_separate'),
         boolean_lexicon: getSelectValue('render-boolean-lexicon', 'python'),
         comparison_glyph_mode: getSelectValue('render-comparison-glyph-mode', 'ascii'),
-        equality_mode: getSelectValue('render-equality-mode', 'double_equals'),
+        equality_mode: getSelectValue('render-equality-mode', 'single_equals'),
         membership_mode: getSelectValue('render-membership-mode', 'python'),
         for_loop_model: getSelectValue('render-for-loop-model', 'single_has_next'),
         element_type_visibility: getSelectValue('render-element-type-visibility', 'hidden'),
         iterable_kind_visibility: getSelectValue('render-iterable-kind-visibility', 'hidden')
-    };
+    });
 };
 
 /**
@@ -1673,6 +1710,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     if (flowchartRenderOptionsCard) {
         const rerenderFlowchartWithCurrentOptions = async () => {
+            syncFlowchartEqualityOptionUI();
             if (!codeEditorInstance || typeof triggerFlowchartUpdate !== 'function') return;
             const currentCode = codeEditorInstance.getValue();
             if (!currentCode || !currentCode.trim()) return;
@@ -1687,6 +1725,8 @@ document.addEventListener('DOMContentLoaded', function() {
         flowchartRenderOptionsCard.querySelectorAll('select').forEach(selectElement => {
             selectElement.addEventListener('change', rerenderFlowchartWithCurrentOptions);
         });
+
+        syncFlowchartEqualityOptionUI();
     }
 
     // --- Gestionnaire pour "Générer un Code Aléatoire" ---
