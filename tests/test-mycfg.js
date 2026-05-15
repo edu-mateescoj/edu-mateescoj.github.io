@@ -547,6 +547,23 @@ json.dumps({
             expect(findNodeIdByLabelFragment(snapshot, 'caractère suivant')).toBeDefined();
         });
 
+        it('Peut activer un modèle for intermédiaire avec affectation unique', async () => {
+            const snapshot = await buildCfgSnapshot('for ch in "abc":\n    print(ch)', {
+                for_loop_model: 'empty_then_shared_next',
+                element_type_visibility: 'show'
+            });
+            const entryDecisionId = findNodeIdByLabelFragment(snapshot, 'Au moins un caractère à parcourir');
+            const repeatDecisionId = findNodeIdByLabelFragment(snapshot, 'Encore un caractère à parcourir');
+            const assignmentNodeId = findNodeIdByLabelFragment(snapshot, 'caractère suivant');
+            const assignmentLabels = Object.values(snapshot.node_labels).filter(nodeLabel => nodeLabel.includes('caractère suivant'));
+
+            expect(Object.values(snapshot.node_labels).some(nodeLabel => nodeLabel.includes('premier caractère'))).toBe(false);
+            expect(assignmentLabels.length).toBe(1);
+            expect(getOutgoingEdges(snapshot, entryDecisionId).some(([, toNode, label]) => toNode === assignmentNodeId && label === 'Oui')).toBe(true);
+            expect(getOutgoingEdges(snapshot, repeatDecisionId).some(([, toNode, label]) => toNode === assignmentNodeId && label === 'Oui')).toBe(true);
+            expect(getNodeRenderPayload(snapshot, assignmentNodeId).for_loop_model).toBe('empty_then_shared_next');
+        });
+
         it('Peut afficher la nature de l\'itérable dans les libellés du for', async () => {
             const snapshot = await buildCfgSnapshot('values = [1, 2]\nfor item in values:\n    print(item)', {
                 iterable_kind_visibility: 'show'
@@ -592,6 +609,19 @@ json.dumps({
             const snapshot = await buildCfgSnapshot(
                 'for x in []:\n    print(x)\nelse:\n    print("empty")\nprint("after")',
                 { for_loop_model: 'empty_then_next' }
+            );
+            const entryDecisionId = findNodeIdByLabelFragment(snapshot, 'Au moins un élément à parcourir');
+            const elseNodeId = findNodeIdByLabelFragment(snapshot, 'empty');
+            const nonEdges = getOutgoingEdges(snapshot, entryDecisionId).filter(([, , label]) => label === 'Non');
+
+            expect(nonEdges.length).toBe(1);
+            expect(nonEdges[0][1]).toBe(elseNodeId);
+        });
+
+        it('Conserve le else d\'un for vide avec le modèle for intermédiaire', async () => {
+            const snapshot = await buildCfgSnapshot(
+                'for x in []:\n    print(x)\nelse:\n    print("empty")\nprint("after")',
+                { for_loop_model: 'empty_then_shared_next' }
             );
             const entryDecisionId = findNodeIdByLabelFragment(snapshot, 'Au moins un élément à parcourir');
             const elseNodeId = findNodeIdByLabelFragment(snapshot, 'empty');

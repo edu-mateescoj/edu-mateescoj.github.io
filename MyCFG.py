@@ -1268,11 +1268,103 @@ class ControlFlowGraph:
         self.loop_stack.pop()
         return [loop_exit_id]
 
+    def _visit_for_empty_then_shared_next(self, node: ast.For, parent_id: str, loop_context: Dict[str, Any]) -> List[str]:
+        """Rendu intermédiaire: empty() puis hasnext(), avec une seule affectation visible."""
+        loop_render_payload = {
+            "kind": "for_loop_control",
+            "iterator_variable": loop_context["iterator_variable"],
+            "iterable_display_name": loop_context["iterable_display_name"],
+            "iterable_kind_desc": loop_context["iterable_kind_desc"],
+            "inferred_element_type": loop_context["inferred_element_type"],
+            "for_loop_model": self._get_render_option("for_loop_model"),
+        }
+
+        entry_decision_id = self.add_node(
+            self._build_for_decision_label(
+                loop_context["entry_decision_text"],
+                loop_context["iterable_reference_text"],
+            ),
+            node_type="Decision",
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "entry_decision",
+            },
+        )
+        self.add_edge(parent_id, entry_decision_id)
+
+        shared_assignment_id = self.add_node(
+            self._build_for_assignment_label(
+                loop_context["iterator_variable"],
+                loop_context["next_assignment_text"],
+                loop_context["iterable_reference_text"],
+            ),
+            node_type="Process",
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "assignment",
+            },
+        )
+        self.add_edge(entry_decision_id, shared_assignment_id, "Oui")
+
+        repeat_decision_id = self.add_node(
+            self._build_for_decision_label(
+                loop_context["repeat_decision_text"],
+                loop_context["iterable_reference_text"],
+            ),
+            node_type="Decision",
+            source_span=loop_context["for_header_span"],
+            render_payload={
+                **loop_render_payload,
+                "role": "repeat_decision",
+            },
+        )
+        self.add_edge(repeat_decision_id, shared_assignment_id, "Oui")
+
+        loop_exit_id = self.add_node(".", node_type="Junction")
+        self.loop_stack.append((repeat_decision_id, loop_exit_id, repeat_decision_id))
+
+        if node.body:
+            body_exit_nodes = self.visit_body(node.body, [shared_assignment_id])
+            for exit_node in body_exit_nodes:
+                if exit_node not in self.terminal_nodes:
+                    self.add_edge(exit_node, repeat_decision_id)
+        else:
+            self.add_edge(shared_assignment_id, repeat_decision_id)
+
+        non_target = loop_exit_id
+        if node.orelse:
+            nodes_before_orelse = {nid for nid, _ in self.nodes}
+            orelse_exit_nodes = self.visit_body(node.orelse, [entry_decision_id])
+            nodes_after_orelse = {nid for nid, _ in self.nodes}
+            new_nodes_in_orelse = sorted(
+                list(nodes_after_orelse - nodes_before_orelse),
+                key=lambda x: int(x.replace("node", ""))
+            )
+
+            if new_nodes_in_orelse:
+                first_node_orelse = new_nodes_in_orelse[0]
+                non_target = first_node_orelse
+                if (entry_decision_id, first_node_orelse, "") in self.edges:
+                    self.edges.remove((entry_decision_id, first_node_orelse, ""))
+
+            for exit_node in orelse_exit_nodes:
+                if exit_node not in self.terminal_nodes:
+                    self.add_edge(exit_node, loop_exit_id)
+
+        self.add_edge(entry_decision_id, non_target, "Non")
+        self.add_edge(repeat_decision_id, non_target, "Non")
+        self.loop_stack.pop()
+        return [loop_exit_id]
+
     def visit_For(self, node: ast.For, parent_id: str) -> List[str]:
         """Visite une boucle 'for' AST selon le modèle de rendu configuré."""
         loop_context = self._build_for_loop_render_context(node)
         if self._get_render_option("for_loop_model") == "empty_then_next":
             return self._visit_for_empty_then_next(node, parent_id, loop_context)
+        if self._get_render_option("for_loop_model") == "empty_then_shared_next":
+            return self._visit_for_empty_then_shared_next(node, parent_id, loop_context)
         return self._visit_for_single_has_next(node, parent_id, loop_context)
     
 
