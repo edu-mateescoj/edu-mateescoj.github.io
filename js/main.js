@@ -65,6 +65,7 @@ let lastDiagramAstDump = ""; // Pour la synchronisation diagramme/code
 let lastLoggedCanonicalCode = ""; // Stocke le dernier code normalisé qui a été journalisé
 let currentChallengeCodeId = null; // Pour stocker l'ID du code de défi actuel
 let currentChallengeVariableTypes = {}; // Types détectés pour le défi courant
+let flowchartOutsideSelectionClearHandler = null;
 
 // --- Variables DOM globales (déclarées ici pour être accessibles partout) ---
 let difficultyGlobalSelect;
@@ -187,6 +188,35 @@ window.clearEditorSourceSelection = function() {
     const cursor = doc.getCursor('from');
     doc.setSelection(cursor, cursor, { origin: '+flowchart' });
 };
+
+function installFlowchartOutsideSelectionClearHandler() {
+    if (flowchartOutsideSelectionClearHandler) {
+        document.removeEventListener('mousedown', flowchartOutsideSelectionClearHandler, true);
+    }
+
+    flowchartOutsideSelectionClearHandler = function(event) {
+        if (!window.__selectedFlowchartNodeId && !window.__selectedFlowchartRowSourceSpan) {
+            return;
+        }
+
+        const eventTarget = event.target instanceof Element ? event.target : event.target?.parentElement;
+        if (!eventTarget) return;
+
+        if (eventTarget.closest('#flowchart')) {
+            return;
+        }
+
+        if (eventTarget.closest('.CodeMirror-gutters, .CodeMirror-linenumber, .CodeMirror-linenumbers')) {
+            return;
+        }
+
+        if (typeof window.clearFlowchartSelection === 'function') {
+            window.clearFlowchartSelection('flowchart');
+        }
+    };
+
+    document.addEventListener('mousedown', flowchartOutsideSelectionClearHandler, true);
+}
 
 // --- Mémoriser le code après génération ou chargement d'exemple ---
 function memorizeLoadedCode(code) {
@@ -1246,38 +1276,60 @@ function injectMermaidStylesIntoSvg(svg) {
          .node polygon, 
          .node circle,
          .node path  {
-            fill: #ffffff;
-            stroke: #000000;
-            stroke-width: 2px;
+            fill: #ffffff !important;
+            stroke: #000000 !important;
+            stroke-width: 2px !important;
         }
          .edgePath .path,
          .flowchart-link  {
-            stroke: #000000;
-            stroke-width: 2px;
-            fill: none;
+            stroke: #000000 !important;
+            stroke-width: 2px !important;
+            fill: none !important;
         }
          marker, 
          marker path,
          marker circle  {
-            fill: #000000;
-            stroke: #000000;
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
          .cluster rect {
-            fill: none;
-            stroke: #000000;
-            stroke-width: 1px;
+            fill: none !important;
+            stroke: #000000 !important;
+            stroke-width: 1px !important;
             opacity: 0.4;
         }
          .node .label, 
          .node .nodeLabel,
          .cluster text,
          .edgeLabel,
-         foreignObject div {
-            font-family: 'Segoe UI', sans-serif;
-            font-size: 16px;
-            font-weight: 500;
-            fill: #000000;
-            stroke: none;
+         foreignObject div,
+         foreignObject table,
+         foreignObject tbody,
+         foreignObject tr,
+         foreignObject td,
+         foreignObject th,
+         foreignObject span,
+         foreignObject p {
+            font-family: 'Segoe UI', sans-serif !important;
+            font-size: 16px !important;
+            font-weight: 500 !important;
+            fill: #000000 !important;
+            color: #000000 !important;
+            stroke: none !important;
+            background: transparent !important;
+            line-height: 1.4 !important;
+        }
+         .node .label p,
+         .node .nodeLabel p,
+         foreignObject p {
+            margin: 0 !important;
+        }
+         foreignObject {
+            overflow: visible !important;
+        }
+         foreignObject table {
+            border-collapse: collapse !important;
+            margin: 0 auto !important;
         }
     `;
 
@@ -1303,19 +1355,51 @@ function injectMermaidStylesIntoSvg(svg) {
 }
 
 function cleanInlineMermaidStyles(svg) {
-    // 1) Enlever tout attribut style=* qui fixe fill/stroke
-    svg.querySelectorAll('[style]').forEach(el => {
-        el.removeAttribute('style');
+    // 1) Nettoyer uniquement les formes SVG dont Mermaid fige parfois les couleurs.
+    svg.querySelectorAll('rect[style], polygon[style], circle[style], path[style], marker[style], marker path[style], marker circle[style]').forEach(el => {
+        if (!el.closest('foreignObject')) {
+            el.removeAttribute('style');
+        }
     });
 
     // 2) Normaliser fill/stroke sur les noeuds/edges :
     svg.querySelectorAll('rect, polygon, circle, path').forEach(el => {
-        el.removeAttribute('fill');
-        el.removeAttribute('stroke');
+        if (!el.closest('foreignObject')) {
+            el.removeAttribute('fill');
+            el.removeAttribute('stroke');
+        }
     });
 
-    // 3) Supprimer les anciens <style> internes Mermaid
-    svg.querySelectorAll('style').forEach(el => el.parentNode.removeChild(el));
+    // Les <style> internes de Mermaid portent souvent encore le thème écran
+    // (notamment sombre) et reprennent la main sur l'export si on les laisse.
+    svg.querySelectorAll('style').forEach(el => el.remove());
+}
+
+function insertWhiteExportBackground(svg, bbox) {
+    if (!svg || !bbox || bbox.width <= 0 || bbox.height <= 0) return;
+
+    svg.querySelectorAll('rect[data-export-background="true"]').forEach(el => el.remove());
+
+    const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bgRect.setAttribute('data-export-background', 'true');
+    bgRect.setAttribute('x', bbox.x);
+    bgRect.setAttribute('y', bbox.y);
+    bgRect.setAttribute('width', bbox.width);
+    bgRect.setAttribute('height', bbox.height);
+    bgRect.setAttribute('fill', '#ffffff');
+
+    // On garde le fond derrière le graphe tout en laissant <title>, <style> et <defs>
+    // en tête du document pour ne pas perturber les métadonnées et références SVG.
+    const firstRenderableChild = Array.from(svg.childNodes).find(node => {
+        return node.nodeType === Node.ELEMENT_NODE
+            && !['title', 'style', 'desc', 'defs', 'metadata'].includes(node.nodeName.toLowerCase());
+    });
+
+    if (firstRenderableChild) {
+        svg.insertBefore(bgRect, firstRenderableChild);
+    } else {
+        svg.appendChild(bgRect);
+    }
 }
 
 /**
@@ -1372,6 +1456,7 @@ async function exportFlowchartAsPng() {
     );
     cleanInlineMermaidStyles(clonedSvg);
     injectMermaidStylesIntoSvg(clonedSvg);
+    insertWhiteExportBackground(clonedSvg, bbox);
 
     // Nettoyer d'éventuels <image href="http://..."> qui repollueraient le canvas
     const images = clonedSvg.querySelectorAll('image');
@@ -1459,10 +1544,20 @@ function exportFlowchartAsSvg() {
 
     // 1. Cloner le SVG pour ne pas toucher à l'original
     const clonedSvg = svg.cloneNode(true);
+    const bbox = svg.getBBox();
+
+    if (bbox && bbox.width > 0 && bbox.height > 0) {
+        clonedSvg.setAttribute('width', bbox.width);
+        clonedSvg.setAttribute('height', bbox.height);
+        clonedSvg.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
+    }
+
+    clonedSvg.removeAttribute('style');
 
     // 2. Injecter les styles Mermaid calculés (mêmes couleurs que l’UI)
     cleanInlineMermaidStyles(clonedSvg);
     injectMermaidStylesIntoSvg(clonedSvg);
+    insertWhiteExportBackground(clonedSvg, bbox);
 
     // 3. Ajouter un <title> avec date/heure (métadonnée interne)
     const now = new Date();
@@ -1519,6 +1614,30 @@ document.addEventListener('DOMContentLoaded', function() {
         readOnly: !isEditorEditable // Initialement non éditable
 
     });
+
+    if (typeof window.setFlowchartCurrentEditorCode === 'function') {
+        window.setFlowchartCurrentEditorCode(codeEditorInstance.getValue());
+    }
+
+    codeEditorInstance.on('gutterClick', function(instance, line, gutter, clickEvent) {
+        if (!gutter || !String(gutter).includes('CodeMirror-linenumber')) {
+            return;
+        }
+
+        if (clickEvent && typeof clickEvent.preventDefault === 'function') {
+            clickEvent.preventDefault();
+        }
+
+        const selectionResult = typeof window.selectFlowchartElementByEditorLine === 'function'
+            ? window.selectFlowchartElementByEditorLine(line, 'flowchart', { syncEditorSelection: true, clearOnMiss: true })
+            : null;
+
+        if (!selectionResult && typeof window.clearFlowchartSelection === 'function') {
+            window.clearFlowchartSelection('flowchart');
+        }
+    });
+
+    installFlowchartOutsideSelectionClearHandler();
 
     // Corriger le warning de DevTools : CodeMirror cree une textarea interne sans id/name
     const cmInput = codeEditorInstance.getInputField();
@@ -1866,10 +1985,16 @@ document.addEventListener('DOMContentLoaded', function() {
         codeEditorInstance.on('change', async function() {
             if (!pyodide) return;
             if (!lastDiagramAstDump) {
+                if (typeof window.setFlowchartCurrentEditorCode === 'function') {
+                    window.setFlowchartCurrentEditorCode(codeEditorInstance.getValue());
+                }
                 setDiagramAndChallengeCardState("default");
                 return;
             }
             const currentCode = codeEditorInstance.getValue();
+            if (typeof window.setFlowchartCurrentEditorCode === 'function') {
+                window.setFlowchartCurrentEditorCode(currentCode);
+            }
             const currentAstDump = await getAstDumpFromCode(currentCode);
             if (!currentAstDump) {
                 setDiagramAndChallengeCardState("outdated");

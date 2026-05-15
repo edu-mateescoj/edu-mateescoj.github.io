@@ -1080,7 +1080,12 @@ class ControlFlowGraph:
             if isinstance(assign_node, ast.Assign):
                 self._store_assignment_metadata(assign_node.targets, assign_node.value)
             label_lines.append(self._format_assignment_statement_label(assign_node))
-            render_rows.append(self._get_assignment_display_parts(assign_node))
+            row_parts = dict(self._get_assignment_display_parts(assign_node))
+            row_parts["source_span"] = self._build_source_span(
+                source_start_node=assign_node,
+                source_end_node=assign_node,
+            )
+            render_rows.append(row_parts)
 
         assign_block_id = self.add_node(
             "\n".join(label_lines),
@@ -1089,6 +1094,7 @@ class ControlFlowGraph:
             source_end_node=assign_nodes[-1],
             render_payload={
                 "kind": "assignment_block",
+                "layout_mode": "stacked_compact",
                 "rows": render_rows,
             },
         )
@@ -1371,13 +1377,36 @@ class ControlFlowGraph:
             render_payload = self.node_render_payloads.get(node_id, {})
             rows = render_payload.get("rows", [])
             if rows:
+                def _build_row_source_attrs(row_payload: Dict[str, Any]) -> str:
+                    source_span = row_payload.get("source_span")
+                    if not isinstance(source_span, dict):
+                        return ""
+
+                    source_attrs: List[str] = []
+                    for attr_name, span_key in (
+                        ("data-source-lineno", "lineno"),
+                        ("data-source-end-lineno", "end_lineno"),
+                        ("data-source-col-offset", "col_offset"),
+                        ("data-source-end-col-offset", "end_col_offset"),
+                    ):
+                        value = source_span.get(span_key)
+                        if isinstance(value, int):
+                            source_attrs.append(f"{attr_name}='{value}'")
+
+                    if not source_attrs:
+                        return ""
+                    return " " + " ".join(source_attrs)
+
                 rendered_rows: List[str] = []
                 for row in rows:
+                    row_source_attrs = _build_row_source_attrs(row)
                     rendered_rows.append(
-                        "<tr>"
-                        f"<td style='text-align: right; padding-right: 0.45em;'>{html.escape(row['target'], quote=False)}</td>"
-                        f"<td style='text-align: center; padding: 0 0.15em; min-width: 2.4em;'>{html.escape(row['operator'], quote=False)}</td>"
-                        f"<td style='text-align: left; padding-left: 0.45em;'>{html.escape(row['value'], quote=False)}</td>"
+                        f"<tr{row_source_attrs}>"
+                        f"<td colspan='3'{row_source_attrs} style='border: 1px solid currentColor; padding: 0.25em 0.6em; text-align: left;'>"
+                        f"{html.escape(row['target'], quote=False)}"
+                        f" {html.escape(row['operator'], quote=False)}"
+                        f" {html.escape(row['value'], quote=False)}"
+                        "</td>"
                         "</tr>"
                     )
                 return (

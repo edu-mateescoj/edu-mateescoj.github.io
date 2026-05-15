@@ -11,9 +11,10 @@ import json
 from MyCFG import ControlFlowGraph
 
 cfg = ControlFlowGraph(cfg_test_code)
-cfg.process_and_get_results()
+output = cfg.process_and_get_results()
 
 json.dumps({
+    "mermaid": output.get("mermaid", ""),
     "edges": sorted(list(cfg.edges)),
     "node_labels": cfg.node_labels,
     "node_types": cfg.node_types,
@@ -194,6 +195,14 @@ json.dumps({
             expect(
                 Object.values(snapshot.node_labels).some(nodeLabel => nodeLabel === 'count -= 2')
             ).toBe(false);
+        });
+
+        it('Rend un bloc d affectations fusionné avec des lignes compactes et des spans source par ligne', async () => {
+            const snapshot = await buildCfgSnapshot('x = 1\ny = 2\nprint(y)');
+
+            expect(snapshot.mermaid.includes('border: 1px solid currentColor')).toBe(true);
+            expect(snapshot.mermaid.includes("data-source-lineno='1'")).toBe(true);
+            expect(snapshot.mermaid.includes("data-source-lineno='2'")).toBe(true);
         });
 
         it('Expose des plages source AST pour les noeuds du CFG', async () => {

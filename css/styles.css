@@ -187,6 +187,30 @@
     stroke: transparent !important;
 }
 
+#flowchart svg g.node.flowchart-node-row-selected rect,
+#flowchart svg g.node.flowchart-node-row-selected polygon,
+#flowchart svg g.node.flowchart-node-row-selected circle,
+#flowchart svg g.node.flowchart-node-row-selected path {
+    fill: var(--mermaid-node-bg) !important;
+    stroke: var(--selection-accent) !important;
+    stroke-width: 3px !important;
+}
+
+#flowchart svg g.node.flowchart-node-row-selected foreignObject tr.flowchart-row-selected td,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject td.flowchart-row-selected-cell,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject th.flowchart-row-selected-cell {
+    background-color: var(--selection-fill) !important;
+    color: var(--selection-accent) !important;
+    border-color: var(--selection-accent) !important;
+    box-shadow: inset 0 0 0 1px var(--selection-accent);
+}
+
+#flowchart svg g.node.flowchart-node-row-selected foreignObject tr.flowchart-row-selected,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject td.flowchart-row-selected-cell,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject th.flowchart-row-selected-cell {
+    color: var(--selection-accent) !important;
+}
+
 /* Liens (Flèches) */
 #flowchart svg .edgePath .path,
 #flowchart svg .flowchart-link  {
