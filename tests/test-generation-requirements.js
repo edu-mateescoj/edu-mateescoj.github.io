@@ -28,8 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 loop_while_op: true
             });
 
-            expect(requirements.minLines).toBe(23);
-            expect(requirements.minVariables).toBe(13);
+            expect(requirements.minLines).toBe(19);
+            expect(requirements.minVariables).toBe(10);
         });
 
         it("Compte for_list avec un seul cout variable sans liste explicite", async () => {
@@ -67,6 +67,83 @@ document.addEventListener('DOMContentLoaded', () => {
 
             expect(requirements.minLines).toBe(8);
             expect(requirements.minVariables).toBe(6);
+        });
+
+        it("Surligne bool en suggestion pour les structures if", async () => {
+            const plan = window.GenerationRequirements.calculateHighlightPlan({
+                main_conditions: true,
+                cond_if: true
+            });
+
+            expect(plan.highlights['var-bool'].state).toBe('suggested');
+        });
+
+        it("Surligne for_List et for_Str en suggestion seulement", async () => {
+            const listPlan = window.GenerationRequirements.calculateHighlightPlan({
+                main_loops: true,
+                loop_for_list: true
+            });
+            const strPlan = window.GenerationRequirements.calculateHighlightPlan({
+                main_loops: true,
+                loop_for_str: true
+            });
+
+            expect(listPlan.highlights['var-list'].state).toBe('suggested');
+            expect(strPlan.highlights['var-str'].state).toBe('suggested');
+        });
+
+        it("Impose comparaison et entier pour un while sans int explicite", async () => {
+            const plan = window.GenerationRequirements.calculateHighlightPlan({
+                difficultyLevelGlobal: 1,
+                main_loops: true,
+                loop_while: true
+            });
+
+            expect(plan.highlights['op-comparison'].state).toBe('required');
+            expect(plan.highlights['var-int'].state).toBe('required');
+        });
+
+        it("Suggère le membership dès qu'une séquence est disponible", async () => {
+            const plan = window.GenerationRequirements.calculateHighlightPlan({
+                var_str_count: 1
+            });
+
+            expect(plan.highlights['op-membership'].state).toBe('suggested');
+        });
+
+        it("Choisit un seul support de séquence imposé quand membership est sélectionné", async () => {
+            const plan = window.GenerationRequirements.calculateHighlightPlan({
+                difficultyLevelGlobal: 3,
+                op_membership: true
+            });
+
+            expect(plan.highlights['var-str'].state).toBe('required');
+            expect((plan.highlights['var-list'] || { state: 'none' }).state).toBe('none');
+        });
+
+        it("Le required domine le suggested sur les types de séquence", async () => {
+            const plan = window.GenerationRequirements.calculateHighlightPlan({
+                difficultyLevelGlobal: 3,
+                main_loops: true,
+                loop_for_str: true,
+                op_membership: true
+            });
+
+            expect(plan.highlights['var-str'].state).toBe('required');
+        });
+
+        it("Le plan de highlight se recalcule quand la difficulté change", async () => {
+            const lowDifficultyPlan = window.GenerationRequirements.calculateHighlightPlan({
+                difficultyLevelGlobal: 1,
+                op_comparison: true
+            });
+            const highDifficultyPlan = window.GenerationRequirements.calculateHighlightPlan({
+                difficultyLevelGlobal: 5,
+                op_comparison: true
+            });
+
+            expect(highDifficultyPlan.semanticRequirements.minLines > lowDifficultyPlan.semanticRequirements.minLines).toBe(true);
+            expect(highDifficultyPlan.highlights['num-lines-global'].state).toBe('required');
         });
     });
 });

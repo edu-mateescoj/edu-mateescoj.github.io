@@ -233,7 +233,9 @@ function addAdvancedOperationOptionsIfNeeded(isAdvancedModeActiveOverride = null
     const isAdvanced = isAdvancedModeActiveOverride !== null ? isAdvancedModeActiveOverride :
                        (document.getElementById('advanced-mode') ? document.getElementById('advanced-mode').checked : false);
     const advancedOpOptions = [
-        { id: 'op-and', label: 'and' }, { id: 'op-or', label: 'or' }, { id: 'op-not', label: 'not' },
+        { id: 'op-logic', label: 'and or not' },
+        { id: 'op-membership', label: 'in not' },
+        { id: 'op-comparison', label: '<>!=' },
         { id: 'op-slice-ab', label: '[:]' }, // Slicing simple [a:b]
         { id: 'op-slice-abs', label: '[::]' } // Slicing avec step [a:b:s]
     ];
@@ -285,12 +287,11 @@ function addAdvancedLoopOptionsIfNeeded(container, isAdvancedModeActiveOverride 
     const advancedLoopOptions = [
         { id: 'loop-nested-for2', label: 'for^2' },
         { id: 'loop-nested-for3', label: 'for^3' },
-        { id: 'loop-while-op', label: 'while{op}' },
         { id: 'loop-range-ab', label: 'range(a,b)'},
         { id: 'loop-range-abs', label: 'range(a,b,s)'}
     ];
     // Anciennes options à s'assurer de supprimer si elles existent
-    const oldAdvancedLoopOptionIDs = ['loop-for-tuple', 'loop-continue'];
+    const oldAdvancedLoopOptionIDs = ['loop-for-tuple', 'loop-continue', 'loop-while-op'];
     if (isAdvanced) {
         // console.log("Mode avancé pour Boucles: Ajout.");
         advancedLoopOptions.forEach(opt => {
@@ -646,6 +647,11 @@ function calculateGlobalRequirements() {
             func_def_simple: getChecked('func-def-simple'),
             func_def_a: getChecked('func-def-a'),
             func_def_ab: getChecked('func-def-ab'),
+            op_and: getChecked('op-and'),
+            op_or: getChecked('op-or'),
+            op_not: getChecked('op-not'),
+            op_in: getChecked('op-in'),
+            op_not_in: getChecked('op-not-in'),
             builtin_print: getChecked('builtin-print'),
             func_return: getChecked('func-return')
         }, {
@@ -691,94 +697,130 @@ function updateGlobalConfigSelectors() {
     populateSelectWithOptions(numTotalVariablesGlobalSelect, minVariables, MAX_TOTAL_VARIABLES_GLOBAL, minVariables);
             // Math.max(currentNumTotalVariablesVal, minVariables));
 }
-// Cette fonction gère les suggestions visuelles basées sur les options sélectionnées.
-// Elle est appelée après chaque changement de syntaxe ou du mode avancé.
-function handleVisualInterdependencies() {
+
+function getCurrentGenerationUiOptions() {
     const getChecked = (id) => document.getElementById(id) ? document.getElementById(id).checked : false;
-    // Fonction pour récupérer le compte d'une variable type si sa checkbox est cochée
     const getVarCount = (type) => {
         const checkbox = document.getElementById(`var-${type}`);
         const select = document.getElementById(`var-${type}-count`);
         if (checkbox && checkbox.checked && select && select.style.display !== 'none') {
-            return parseInt(select.value);
+            return parseInt(select.value, 10);
         }
         return 0;
     };
 
-    // Classe CSS pour le surlignage des suggestions
-    const highlightClassContainer = 'suggestion-highlight-container';
-    const highlightClassSelect = 'suggestion-highlight-select';
-
-    // Fonction utilitaire pour ajouter/retirer la classe de surlignage au parent (.form-check.form-check-inline)
-    const toggleHighlight = (elementId, condition) => {
-        const element = document.getElementById(elementId);
-        if (element && element.parentElement && element.parentElement.classList.contains('form-check')) { // Cible le div.form-check parent
-            if (condition) {
-                element.parentElement.classList.add(highlightClassContainer);
-            } else {
-                element.parentElement.classList.remove(highlightClassContainer);
-            }
-        } else if (element && element.tagName === 'SELECT') { // Pour les selects directement
-                if (condition) {
-                element.classList.add(highlightClassSelect);
-            } else {
-                element.classList.remove(highlightClassSelect);
-            }
-        }
+    return {
+        difficultyLevelGlobal: difficultyGlobalSelect ? parseInt(difficultyGlobalSelect.value, 10) : 1,
+        var_int_count: getVarCount('int'),
+        var_float_count: getVarCount('float'),
+        var_str_count: getVarCount('str'),
+        var_list_count: getVarCount('list'),
+        var_bool_count: getVarCount('bool'),
+        op_logic: getChecked('op-logic'),
+        op_membership: getChecked('op-membership'),
+        op_comparison: getChecked('op-comparison'),
+        op_slice_ab: getChecked('op-slice-ab'),
+        op_slice_abs: getChecked('op-slice-abs'),
+        op_and: getChecked('op-and'),
+        op_or: getChecked('op-or'),
+        op_not: getChecked('op-not'),
+        op_in: getChecked('op-in'),
+        op_not_in: getChecked('op-not-in'),
+        main_conditions: getChecked('frame-conditions'),
+        cond_if: getChecked('cond-if'),
+        cond_if_if: getChecked('cond-if-if'),
+        cond_if_if_if: getChecked('cond-if-if-if'),
+        cond_if_else: getChecked('cond-if-else'),
+        cond_if_elif: getChecked('cond-if-elif'),
+        cond_if_elif_else: getChecked('cond-if-elif-else'),
+        main_loops: getChecked('frame-loops'),
+        loop_for_list: getChecked('loop-for-list'),
+        loop_for_str: getChecked('loop-for-str'),
+        loop_while: getChecked('loop-while'),
+        loop_while_op: getChecked('loop-while-op'),
+        loop_for_range: getChecked('loop-for-range'),
+        loop_range_ab: getChecked('loop-range-ab'),
+        loop_range_abs: getChecked('loop-range-abs'),
+        loop_nested_for2: getChecked('loop-nested-for2'),
+        loop_nested_for3: getChecked('loop-nested-for3'),
+        main_functions: getChecked('frame-functions'),
+        func_def_simple: getChecked('func-def-simple'),
+        func_def_a: getChecked('func-def-a'),
+        func_def_ab: getChecked('func-def-ab'),
+        func_op_list: getChecked('func-op-list'),
+        func_op_str: getChecked('func-op-str'),
+        builtin_print: getChecked('builtin-print'),
+        func_return: getChecked('func-return')
     };
+}
 
-    // 1. Suggérer Slicing si List ou Str est coché
-    const strIsActive = getVarCount('str') > 0;
-    const listIsActive = getVarCount('list') > 0;
-    toggleHighlight('op-slice-ab', strIsActive || listIsActive);
-    toggleHighlight('op-slice-abs', strIsActive || listIsActive);
-
-    // 2. Suggérer Opérateurs Logiques (and, or, not) si Bool est coché
-    const boolIsActive = getVarCount('bool') > 0;
-    toggleHighlight('op-and', boolIsActive);
-    toggleHighlight('op-or', boolIsActive);
-    toggleHighlight('op-not', boolIsActive); // 'not' suggère aussi bool
-
-    // 3. Suggérer type Bool si 'not', 'and', ou 'or' est coché
-    const whileOpLoopActive = getChecked('loop-while-op');
-    const logicalOpActive = getChecked('op-and') || getChecked('op-or') || getChecked('op-not');
-    const boolDrivenSyntaxActive = logicalOpActive || whileOpLoopActive;
-    toggleHighlight('var-bool', boolDrivenSyntaxActive);
-    // Si un opérateur logique est actif et qu'on a moins de bools que nécessaire (1 pour not, 2 pour and/or)
-    const boolVarCountSelect = document.getElementById('var-bool-count');
-    if (boolDrivenSyntaxActive && getChecked('var-bool')) { // Seulement si la checkbox bool est déjà cochée
-            if ((getChecked('op-and') || getChecked('op-or')) && getVarCount('bool') < 2) {
-            if (boolVarCountSelect) boolVarCountSelect.classList.add(highlightClassSelect);
-        } else if ((getChecked('op-not') || whileOpLoopActive) && getVarCount('bool') < 1) { // Devrait toujours être au moins 1 si coché
-            if (boolVarCountSelect) boolVarCountSelect.classList.add(highlightClassSelect);
-        }
-            else {
-            if (boolVarCountSelect) boolVarCountSelect.classList.remove(highlightClassSelect);
-        }
-    } else {
-            if (boolVarCountSelect) boolVarCountSelect.classList.remove(highlightClassSelect);
+function applyHighlightStateToElement(elementId, state = 'none', reasons = []) {
+    const element = document.getElementById(elementId);
+    if (!element) {
+        return;
     }
 
+    const parentFormCheck = element.parentElement && element.parentElement.classList.contains('form-check')
+        ? element.parentElement
+        : null;
+    const targetElement = parentFormCheck || element;
+    const containerClasses = ['highlight-suggested-container', 'highlight-required-container'];
+    const selectClasses = ['highlight-suggested-select', 'highlight-required-select'];
 
-    // 4. Suggérer type Str/List si Slicing est coché
-    const slicingActive = getChecked('op-slice-ab') || getChecked('op-slice-abs');
-    toggleHighlight('var-str', slicingActive);
-    toggleHighlight('var-list', slicingActive);
+    targetElement.classList.remove(...containerClasses, ...selectClasses);
+    targetElement.removeAttribute('data-highlight-state');
+    targetElement.removeAttribute('title');
+    if (parentFormCheck && element !== parentFormCheck) {
+        element.removeAttribute('title');
+    }
 
-    // 5. Suggérer type List si 'opList' (Func) ou 'for_List' (Loop) est coché
-    const opListFuncActive = getChecked('func-op-list');
-    const forListLoopActive = getChecked('loop-for-list');
-    toggleHighlight('var-list', opListFuncActive || forListLoopActive || (slicingActive && !strIsActive)); // Suggère list pour slicing si str n'est pas déjà la raison
+    if (state === 'suggested') {
+        targetElement.classList.add(parentFormCheck ? 'highlight-suggested-container' : 'highlight-suggested-select');
+        targetElement.setAttribute('data-highlight-state', 'suggested');
+    } else if (state === 'required') {
+        targetElement.classList.add(parentFormCheck ? 'highlight-required-container' : 'highlight-required-select');
+        targetElement.setAttribute('data-highlight-state', 'required');
+    }
 
-    // 6. Suggérer type Str si 'opStr' (Func) ou 'for_Str' (Loop) est coché
-    const opStrFuncActive = getChecked('func-op-str');
-    const forStrLoopActive = getChecked('loop-for-str');
-    toggleHighlight('var-str', opStrFuncActive || forStrLoopActive || (slicingActive && !listIsActive)); // Suggère str pour slicing si list n'est pas déjà la raison
+    if (state !== 'none' && reasons.length > 0) {
+        const title = reasons.join(' / ');
+        targetElement.title = title;
+        if (parentFormCheck && element !== parentFormCheck) {
+            element.title = title;
+        }
+    }
+}
 
-    // 7. Suggérer Opérateurs Logiques (and, or, not) si 'while{op}' (Loop) est coché
-    toggleHighlight('op-and', whileOpLoopActive || boolIsActive); // Combine avec la suggestion précédente
-    toggleHighlight('op-or', whileOpLoopActive || boolIsActive);  // Combine
-    toggleHighlight('op-not', whileOpLoopActive || boolIsActive); // Combine
+// Cette fonction gère les suggestions visuelles basées sur les options sélectionnées.
+// Elle est appelée après chaque changement de syntaxe ou du mode avancé.
+function handleVisualInterdependencies() {
+    const currentOptions = getCurrentGenerationUiOptions();
+    const highlightPlan = window.GenerationRequirements
+        ? window.GenerationRequirements.calculateHighlightPlan(currentOptions, {
+            minCodeLines: MIN_POSSIBLE_CODE_LINES,
+            minTotalVariables: MIN_POSSIBLE_TOTAL_VARIABLES_GLOBAL,
+            maxCodeLines: MAX_CODE_LINES,
+            maxTotalVariables: MAX_TOTAL_VARIABLES_GLOBAL
+        })
+        : { highlights: {} };
+    const relevantHighlightIds = [
+        'op-slice-ab',
+        'op-slice-abs',
+        'op-membership',
+        'op-logic',
+        'op-comparison',
+        'var-int',
+        'var-str',
+        'var-list',
+        'var-bool',
+        'num-total-variables-global',
+        'num-lines-global'
+    ];
+
+    relevantHighlightIds.forEach(elementId => {
+        const highlightState = highlightPlan.highlights[elementId] || { state: 'none', reasons: [] };
+        applyHighlightStateToElement(elementId, highlightState.state, highlightState.reasons);
+    });
 
     // console.log("Interdependencies updated.");
 }
@@ -1663,6 +1705,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const feedbackModalElement = document.getElementById('feedback-modal');
     feedbackModal = feedbackModalElement ? new bootstrap.Modal(feedbackModalElement) : null;
 
+    const refreshGenerationGuidance = () => {
+        updateGlobalConfigSelectors();
+        handleVisualInterdependencies();
+    };
+
+    if (difficultyGlobalSelect) {
+        difficultyGlobalSelect.addEventListener('change', refreshGenerationGuidance);
+    }
+    if (numLinesGlobalSelect) {
+        numLinesGlobalSelect.addEventListener('change', refreshGenerationGuidance);
+    }
+    if (numTotalVariablesGlobalSelect) {
+        numTotalVariablesGlobalSelect.addEventListener('change', refreshGenerationGuidance);
+    }
+
     // --- Initialisation des boutons de la barre d'outils de l'éditeur ---
     const toggleBtn = document.getElementById('toggle-editable-btn');
     if (toggleBtn) {
@@ -1789,13 +1846,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 var_list_count: getSelectVal('var-list-count', 0, 'list'),
                 var_bool_count: getSelectVal('var-bool-count', 0, 'bool'),
                 op_plus_minus: getChecked('op-plus-minus'),
-                op_mult_div_pow: getChecked('op-mult-div-pow'),
-                op_modulo_floor: getChecked('op-modulo-floor'),
+                op_multiply: getChecked('op-multiply'),
+                op_power: getChecked('op-power'),
+                op_modulo: getChecked('op-modulo'),
+                op_floor_div: getChecked('op-floor-div'),
+                op_mult_div_pow: getChecked('op-multiply') || getChecked('op-power'),
+                op_modulo_floor: getChecked('op-modulo') || getChecked('op-floor-div'),
+                op_logic: getChecked('op-logic'),
+                op_membership: getChecked('op-membership'),
+                op_comparison: getChecked('op-comparison'),
+                op_slice_ab: getChecked('op-slice-ab'),
+                op_slice_abs: getChecked('op-slice-abs'),
                 op_and: getChecked('op-and'),
                 op_or: getChecked('op-or'),
                 op_not: getChecked('op-not'),
-                op_slice_ab: getChecked('op-slice-ab'),
-                op_slice_abs: getChecked('op-slice-abs'),
+                op_in: getChecked('op-in'),
+                op_not_in: getChecked('op-not-in'),
                 main_conditions: getChecked('frame-conditions'),
                 cond_if: getChecked('cond-if'),
                 cond_if_else: getChecked('cond-if-else'),

@@ -47,9 +47,6 @@
 
     <style>
         /* nouveautés */
-        #func-builtins-options-wrapper .row {
-        /* ajuster les gouttières si besoin, mais gx-2 est déjà petit */
-        }
 
         #func-builtins-options-wrapper .col-auto {
             padding-right: 5px; /* Un peu d'espace entre les colonnes */
@@ -105,35 +102,70 @@
             border-radius: var(--bs-border-radius);
         }   
 
-        .suggestion-highlight {
-        border: 1px solid #28a745 !important; /* Vert Bootstrap pour 'success' */
-        border-radius: 0.25rem; /* Correspondre au style des cadres */
-        padding: 0.1rem 0.2rem; /* Petit padding pour que la bordure ne colle pas au texte */
-        margin: -0.1rem -0.2rem; /* Compenser le padding pour l'alignement global */
-        /* box-shadow: 0 0 5px rgba(40, 167, 69, 0.5); /* Optionnel: une légère ombre */
-        transition: border-color 0.3s ease-in-out, box-shadow 0.3s ease-in-out;
+        .ui-highlight-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+            margin-top: 0.5rem;
+            color: var(--text-main);
         }
 
-        /* Ajustement pour que la bordure s'applique bien autour du form-check-inline */
-        /* sans trop perturber le layout des éléments qui ne sont pas surlignés. */
-        /* On cible le parent .form-check.form-check-inline qui contient le label et l'input. */
-        .form-check.form-check-inline.suggestion-highlight-container {
-            border: 1px solid #28a745; /* Vert Bootstrap */
-            border-radius: var(--bs-border-radius-sm, 0.2rem); /* Utiliser une variable Bootstrap si possible, sinon une valeur fixe */
-            padding: 2px 4px; /* Ajustez pour l'espacement visuel */
-            margin: 1px; /* Pour éviter que les bordures ne se chevauchent trop */
-            transition: border-color 0.3s ease-in-out;
-            background-color: rgba(40, 167, 69, 0.1); /* Fond très léger pour renforcer la suggestion */
+        .ui-highlight-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .ui-highlight-swatch {
+            width: 0.8rem;
+            height: 0.8rem;
+            border-radius: 0.2rem;
+            border: 2px solid transparent;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .ui-highlight-swatch-suggested {
+            border-color: #0072B2;
+            background-color: rgba(0, 114, 178, 0.14);
+        }
+
+        .ui-highlight-swatch-required {
+            border-color: #E69F00;
+            background-color: rgba(230, 159, 0, 0.18);
+        }
+
+        .form-check.form-check-inline.highlight-suggested-container {
+            border: 1px solid #0072B2;
+            border-radius: var(--bs-border-radius-sm, 0.2rem);
+            padding: 2px 4px;
+            margin: 1px;
+            transition: border-color 0.3s ease-in-out, background-color 0.3s ease-in-out;
+            background-color: rgba(0, 114, 178, 0.1);
+        }
+
+        .form-check.form-check-inline.highlight-required-container {
+            border: 2px solid #E69F00;
+            border-radius: var(--bs-border-radius-sm, 0.2rem);
+            padding: 2px 4px;
+            margin: 1px;
+            transition: border-color 0.3s ease-in-out, background-color 0.3s ease-in-out;
+            background-color: rgba(230, 159, 0, 0.14);
         }
 
         .card {
             transition: border-color 0.3s;
         }
 
-        /* Style pour surligner un select (par exemple, le compteur de booléens) */
-        select.suggestion-highlight-select {
-            border-color: #28a745 !important; /* Vert Bootstrap */
-            box-shadow: 0 0 0 0.25rem rgba(40, 167, 69, .25) !important; /* Ombre de focus Bootstrap success */
+        select.highlight-suggested-select {
+            border-color: #0072B2 !important;
+            box-shadow: 0 0 0 0.25rem rgba(0, 114, 178, 0.22) !important;
+        }
+
+        select.highlight-required-select {
+            border-color: #E69F00 !important;
+            box-shadow: 0 0 0 0.25rem rgba(230, 159, 0, 0.22) !important;
         }
 
     </style>
@@ -210,6 +242,10 @@
                             </div>
                             <span class="text-muted small">Plus d'options</span>
                         </div>
+                        <div class="ui-highlight-legend small" aria-label="Légende des surlignages de configuration">
+                            <span class="ui-highlight-legend-item"><span class="ui-highlight-swatch ui-highlight-swatch-suggested" aria-hidden="true"></span>Suggestion</span>
+                            <span class="ui-highlight-legend-item"><span class="ui-highlight-swatch ui-highlight-swatch-required" aria-hidden="true"></span>Imposé</span>
+                        </div>
 
                         <!-- Cadres thématiques côte à côte en responsive -->
                         <!-- Wrapper pour les cadres, j'ai ajouté un padding p-0 et retiré le px-0 du card-body parent pour un meilleur contrôle -->
@@ -283,12 +319,20 @@
                                             <label class="form-check-label small" for="op-plus-minus">+ -</label>
                                         </div>
                                         <div class="form-check form-check-inline">
-                                            <input class="form-check-input" type="checkbox" id="op-mult-div-pow">
-                                            <label class="form-check-label small" for="op-mult-div-pow">* / **</label>
+                                            <input class="form-check-input" type="checkbox" id="op-multiply">
+                                            <label class="form-check-label small" for="op-multiply">*</label>
                                         </div>
                                         <div class="form-check form-check-inline">
-                                            <input class="form-check-input" type="checkbox" id="op-modulo-floor">
-                                            <label class="form-check-label small" for="op-modulo-floor">% //</label>
+                                            <input class="form-check-input" type="checkbox" id="op-power">
+                                            <label class="form-check-label small" for="op-power">**</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" id="op-modulo">
+                                            <label class="form-check-label small" for="op-modulo">%</label>
+                                        </div>
+                                        <div class="form-check form-check-inline">
+                                            <input class="form-check-input" type="checkbox" id="op-floor-div">
+                                            <label class="form-check-label small" for="op-floor-div">//</label>
                                         </div>
                                     </div>
                                 </div>

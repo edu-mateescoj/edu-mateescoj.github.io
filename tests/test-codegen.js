@@ -85,6 +85,41 @@ document.addEventListener('DOMContentLoaded', () => {
         return { header, body };
     }
 
+    function extractWhileHeader(code) {
+        return extractLoopBlock(code, 'while ').header;
+    }
+
+    function splitWhileClauses(header) {
+        if (!header) {
+            return [];
+        }
+
+        return header
+            .replace(/^while\s+/, '')
+            .replace(/:\s*$/, '')
+            .split(/\s+and\s+/)
+            .map(clause => clause.replace(/^\(+|\)+$/g, '').trim())
+            .filter(Boolean);
+    }
+
+    function extractWhileSupportVariableNames(code) {
+        return code
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => /^(loop_guard|loop_text|loop_items)/.test(line))
+            .map(line => line.split('=')[0].trim())
+            .filter(name => !name.endsWith('_result'));
+    }
+
+    function findUnusedDeclaredVariables(code, variableNames) {
+        const lines = code.split('\n');
+
+        return variableNames.filter(name => !lines.some(line => {
+            const trimmedLine = line.trim();
+            return !trimmedLine.startsWith(`${name} =`) && trimmedLine.includes(name);
+        }));
+    }
+
     function stripInlineComments(code) {
         return code
             .split('\n')
@@ -94,7 +129,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function hasAdvancedArithmeticOperators(code) {
         const sanitizedCode = stripInlineComments(code);
-        return /(\*\*|\/\/=|\/\/|%=|\*=|\/=| \* | \/ | % )/.test(sanitizedCode);
+        return /(\*\*|\/\/=|\/\/|%=|\*=| \* | % )/.test(sanitizedCode);
+    }
+
+    function hasTrueDivisionOperator(code) {
+        const sanitizedCode = stripInlineComments(code);
+        return /(^|[^/])\/(?!\/)/m.test(sanitizedCode);
+    }
+
+    function collectDistinctMatches(codes, regex) {
+        const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
+        const globalRegex = new RegExp(regex.source, flags);
+        const distinctMatches = new Set();
+
+        codes.forEach(code => {
+            const sanitizedCode = stripInlineComments(code);
+            globalRegex.lastIndex = 0;
+
+            let match = globalRegex.exec(sanitizedCode);
+            while (match) {
+                distinctMatches.add(match[0].trim());
+
+                if (globalRegex.lastIndex === match.index) {
+                    globalRegex.lastIndex++;
+                }
+                match = globalRegex.exec(sanitizedCode);
+            }
+        });
+
+        return distinctMatches;
     }
 
     describe("Générateur de Code Python", () => {
@@ -153,18 +216,135 @@ document.addEventListener('DOMContentLoaded', () => {
             expect(code).toContain('def ');
         });
 
-        it("Doit générer un while avec opérateur logique si demandé", async () => {
+        it("Doit générer un while composé au niveau avancé", async () => {
             const options = {
-                difficultyLevelGlobal: 3,
+                difficultyLevelGlobal: 4,
                 numLinesGlobal: 10,
                 numTotalVariablesGlobal: 5,
                 main_loops: true,
-                loop_while_op: true
+                loop_while: true,
+                op_logic: true,
+                op_comparison: true
             };
             const code = generateRandomPythonCode(options);
 
             expect(code).toContain('while ');
-            expect(code).toMatch(/while .*\b(and|or|not)\b.*:/);
+            expect(code).toMatch(/while .* and .*:/);
+            expect(code.includes('break')).toBe(false);
+            expect(code.includes('Limite de sécurité')).toBe(false);
+        });
+
+        it("Niveau 1 garde un while à comparaison littérale unique", async () => {
+            const code = withFixedRandom(0.35, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 1,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 4,
+                main_loops: true,
+                loop_while: true
+            }));
+
+            const whileHeader = extractWhileHeader(code);
+            expect(/^while \w+ [<>] -?\d+:$/.test(whileHeader)).toBe(true);
+            expect(whileHeader.includes(' and ')).toBe(false);
+            expect(/\bnot\b/.test(whileHeader)).toBe(false);
+            expect(/\bin\b/.test(whileHeader)).toBe(false);
+        });
+
+        it("Niveau 2 garde exactement deux clauses de comparaison", async () => {
+            const code = withSeededRandom(20240517, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 2,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 4,
+                main_loops: true,
+                loop_while: true
+            }));
+
+            const whileHeader = extractWhileHeader(code);
+            const clauses = splitWhileClauses(whileHeader);
+
+            expect(clauses.length).toBe(2);
+            expect(/\bor\b/.test(whileHeader)).toBe(false);
+            expect(/\bnot\b/.test(whileHeader)).toBe(false);
+            expect(/\bnot\s+in\b/.test(whileHeader)).toBe(false);
+            expect(/\bin\b/.test(whileHeader)).toBe(false);
+            expect(clauses.every(clause => /(?:==|!=|<=|>=|<|>)/.test(clause))).toBe(true);
+        });
+
+        it("Niveau 3 peut introduire une borne variable sans ajouter de familles non choisies", async () => {
+            const code = withFixedRandom(0.9, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 3,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 4,
+                main_loops: true,
+                loop_while: true
+            }));
+
+            const whileHeader = extractWhileHeader(code);
+
+            expect(/\b(limit|minimum)\b/.test(whileHeader)).toBe(true);
+            expect(/\bnot\s+in\b/.test(whileHeader)).toBe(false);
+            expect(/\bin\b/.test(whileHeader)).toBe(false);
+            expect(/\bor\b/.test(whileHeader)).toBe(false);
+            expect(/\bnot\b/.test(whileHeader)).toBe(false);
+        });
+
+        it("Niveau 3 sans familles choisies reste plus simple que les niveaux avancés", async () => {
+            const levelThreeCode = withFixedRandom(0.9, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 3,
+                numLinesGlobal: 8,
+                numTotalVariablesGlobal: 4,
+                main_loops: true,
+                loop_while: true
+            }));
+            const advancedCode = withSeededRandom(30303, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 10,
+                numTotalVariablesGlobal: 5,
+                main_loops: true,
+                loop_while: true,
+                op_logic: true,
+                op_membership: true,
+                op_comparison: true
+            }));
+
+            expect(splitWhileClauses(extractWhileHeader(levelThreeCode)).length).toBe(2);
+            expect(splitWhileClauses(extractWhileHeader(advancedCode)).length > 2).toBe(true);
+        });
+
+        it("Un while expert ne déclare pas de supports auxiliaires orphelins", async () => {
+            const code = withSeededRandom(424242, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 12,
+                numTotalVariablesGlobal: 5,
+                main_loops: true,
+                loop_while: true,
+                op_logic: true,
+                op_membership: true
+            }));
+
+            const supportVarNames = extractWhileSupportVariableNames(code);
+
+            expect(findUnusedDeclaredVariables(code, supportVarNames).length).toBe(0);
+            expect(supportVarNames.length <= 3).toBe(true);
+        });
+
+        it("Respecte not et not in explicites sans multiplier les supports", async () => {
+            const code = withSeededRandom(101010, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 12,
+                numTotalVariablesGlobal: 5,
+                main_loops: true,
+                loop_while: true,
+                op_not: true,
+                op_not_in: true
+            }));
+
+            const supportVarNames = extractWhileSupportVariableNames(code);
+
+            expect(/\bnot\b(?!\s+in)/.test(code)).toBe(true);
+            expect(/\bnot\s+in\b/.test(code)).toBe(true);
+            expect(findUnusedDeclaredVariables(code, supportVarNames).length).toBe(0);
+            expect(supportVarNames.length <= 2).toBe(true);
         });
 
         it("Doit simplifier les while faciles", async () => {
@@ -181,21 +361,48 @@ document.addEventListener('DOMContentLoaded', () => {
             expect(whileBodyLines[0].includes('*')).toBe(false);
             expect(whileBodyLines[0].includes('//')).toBe(false);
             expect(whileBodyLines[0].includes('%')).toBe(false);
+            expect(code.includes('break')).toBe(false);
+            expect(code.includes('Limite de sécurité')).toBe(false);
         });
 
-        it("Doit simplifier while{op} quand la difficulté baisse", async () => {
+        it("Doit garder le while simple quand la difficulté baisse", async () => {
             const code = withFixedRandom(0.95, () => generateRandomPythonCode({
                 difficultyLevelGlobal: 1,
                 numLinesGlobal: 8,
                 numTotalVariablesGlobal: 4,
                 main_loops: true,
-                loop_while_op: true
+                loop_while: true
             }));
 
             const whileLine = code.split('\n').find(line => line.trim().startsWith('while '));
             expect(whileLine).toBeDefined();
+            expect(whileLine.includes(' and ')).toBe(false);
             expect(whileLine.includes(' or ')).toBe(false);
-            expect(whileLine.includes('not ')).toBe(false);
+            expect(/\bnot\b/.test(whileLine)).toBe(false);
+            expect(code.includes('break')).toBe(false);
+        });
+
+        it("Fait varier les conditions de contrôle des while avancés", async () => {
+            const seeds = [301, 302, 303, 304, 305, 306];
+            const codes = seeds.map(seed => withSeededRandom(seed, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 5,
+                numLinesGlobal: 10,
+                numTotalVariablesGlobal: 5,
+                main_loops: true,
+                loop_while: true,
+                op_logic: true,
+                op_membership: true,
+                op_comparison: true
+            })));
+
+            const whileHeaders = codes
+                .map(code => code.split('\n').find(line => line.trim().startsWith('while '))?.trim())
+                .filter(Boolean);
+            const distinctHeaders = new Set(whileHeaders);
+
+            expect(distinctHeaders.size > 2).toBe(true);
+            expect(codes.every(code => !code.includes('break'))).toBe(true);
+            expect(codes.every(code => !code.includes('Limite de sécurité'))).toBe(true);
         });
 
         it("Doit enrichir les nested if quand la difficulté monte", async () => {
@@ -323,12 +530,168 @@ document.addEventListener('DOMContentLoaded', () => {
                     main_functions: true,
                     func_def_ab: true,
                     op_plus_minus: true,
-                    op_mult_div_pow: false,
-                    op_modulo_floor: false
+                    op_multiply: false,
+                    op_power: false,
+                    op_modulo: false,
+                    op_floor_div: false
                 }));
 
                 expect(hasAdvancedArithmeticOperators(code)).toBe(false);
+                expect(hasTrueDivisionOperator(code)).toBe(false);
             });
+        });
+
+        it("N'utilise jamais la division réelle même avec les familles avancées activées", async () => {
+            const seeds = [1102, 2203, 3304, 4405, 5506];
+
+            seeds.forEach(seed => {
+                const code = withSeededRandom(seed, () => generateRandomPythonCode({
+                    difficultyLevelGlobal: 6,
+                    numLinesGlobal: 20,
+                    numTotalVariablesGlobal: 6,
+                    var_int_count: 2,
+                    var_float_count: 2,
+                    var_str_count: 1,
+                    var_list_count: 1,
+                    main_functions: true,
+                    func_def_ab: true,
+                    op_plus_minus: true,
+                    op_multiply: true,
+                    op_power: true,
+                    op_modulo: true,
+                    op_floor_div: true
+                }));
+
+                expect(hasTrueDivisionOperator(code)).toBe(false);
+            });
+        });
+
+        it("Doit réserver les conditions aux comparateurs quand seul op_comparison est demandé", async () => {
+            const seeds = [141, 242, 343, 444, 545, 646];
+            const codes = seeds.map(seed => withSeededRandom(seed, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 12,
+                numTotalVariablesGlobal: 5,
+                main_conditions: true,
+                cond_if: true,
+                var_bool_count: 1,
+                var_int_count: 1,
+                var_str_count: 1,
+                op_comparison: true,
+                op_logic: false,
+                op_membership: false
+            })));
+
+            const mergedCode = stripInlineComments(codes.join('\n'));
+            expect(/(==|!=|<=|>=|<|>| is | is not )/.test(mergedCode)).toBe(true);
+            expect(mergedCode.includes(' and ')).toBe(false);
+            expect(mergedCode.includes(' or ')).toBe(false);
+            expect(mergedCode.includes(' not in ')).toBe(false);
+        });
+
+        it("Doit mobiliser le membership quand seul op_membership est demandé", async () => {
+            const seeds = [717, 818, 919, 1020, 1121, 1222];
+            const codes = seeds.map(seed => withSeededRandom(seed, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 5,
+                numLinesGlobal: 12,
+                numTotalVariablesGlobal: 5,
+                main_conditions: true,
+                cond_if: true,
+                var_list_count: 1,
+                var_str_count: 1,
+                op_comparison: false,
+                op_logic: false,
+                op_membership: true
+            })));
+
+            const mergedCode = stripInlineComments(codes.join('\n'));
+            expect(mergedCode.includes(' in ') || mergedCode.includes(' not in ')).toBe(true);
+            expect(/(==|!=|<=|>=|<|>| is | is not )/.test(mergedCode)).toBe(false);
+            expect(mergedCode.includes(' and ')).toBe(false);
+            expect(mergedCode.includes(' or ')).toBe(false);
+        });
+
+        it("Doit garantir in et not in au niveau 5 si op_membership est demandé", async () => {
+            const code = withSeededRandom(1313, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 5,
+                numLinesGlobal: 14,
+                numTotalVariablesGlobal: 5,
+                main_conditions: true,
+                cond_if: true,
+                var_bool_count: 1,
+                var_list_count: 1,
+                var_str_count: 1,
+                op_comparison: false,
+                op_logic: false,
+                op_membership: true
+            }));
+
+            const mergedCode = stripInlineComments(code);
+            expect(mergedCode.includes(' in ')).toBe(true);
+            expect(mergedCode.includes(' not in ')).toBe(true);
+        });
+
+        it("Doit rendre accessibles is et is not au niveau difficile", async () => {
+            const seeds = [1901, 1902, 1903, 1904, 1905, 1906, 1907, 1908, 1909, 1910];
+            const codes = seeds.map(seed => withSeededRandom(seed, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 14,
+                numTotalVariablesGlobal: 5,
+                main_conditions: true,
+                cond_if: true,
+                var_bool_count: 2,
+                op_comparison: true,
+                op_logic: false,
+                op_membership: false
+            })));
+
+            const mergedCode = stripInlineComments(codes.join('\n'));
+            expect(mergedCode.includes(' is ') || mergedCode.includes(' is not ')).toBe(true);
+        });
+
+        it("Doit garantir tout le pool de comparateurs au niveau 5 si op_comparison est demandé", async () => {
+            const code = withSeededRandom(1717, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 5,
+                numLinesGlobal: 20,
+                numTotalVariablesGlobal: 5,
+                main_conditions: true,
+                cond_if: true,
+                var_bool_count: 2,
+                var_int_count: 2,
+                op_comparison: true,
+                op_logic: false,
+                op_membership: false
+            }));
+
+            const mergedCode = stripInlineComments(code);
+            expect(mergedCode.includes('==')).toBe(true);
+            expect(mergedCode.includes('!=')).toBe(true);
+            expect(/\s<\s/.test(mergedCode)).toBe(true);
+            expect(/\s>\s/.test(mergedCode)).toBe(true);
+            expect(mergedCode.includes('<=')).toBe(true);
+            expect(mergedCode.includes('>=')).toBe(true);
+            expect(mergedCode.includes(' is ')).toBe(true);
+            expect(mergedCode.includes(' is not ')).toBe(true);
+        });
+
+        it("Doit garder une variabilité minimale sur les comparateurs autorisés", async () => {
+            const seeds = [2101, 2202, 2303, 2404, 2505, 2606, 2707, 2808];
+            const codes = seeds.map(seed => withSeededRandom(seed, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 6,
+                numLinesGlobal: 14,
+                numTotalVariablesGlobal: 5,
+                main_conditions: true,
+                cond_if: true,
+                var_bool_count: 1,
+                var_int_count: 1,
+                var_str_count: 1,
+                op_comparison: true,
+                op_logic: false,
+                op_membership: false
+            })));
+
+            const distinctComparators = collectDistinctMatches(codes, /is not|is|==|!=|<=|>=|<|>/g);
+            expect(distinctComparators.size).toBeGreaterThan(2);
         });
 
         it("Doit garantir un slice simple quand op_slice_ab est demandé", async () => {
@@ -353,22 +716,60 @@ document.addEventListener('DOMContentLoaded', () => {
             expect(code).toMatch(/\[[^\]\n]*:[^\]\n]*:[1-9]\d*\]/);
         });
 
-        it("Doit respecter les opérateurs booléens cochés (or/not)", async () => {
+        it("Doit mobiliser un opérateur logique si op_logic est demandé", async () => {
             const code = withSeededRandom(424242, () => generateRandomPythonCode({
                 difficultyLevelGlobal: 3,
                 numLinesGlobal: 8,
                 numTotalVariablesGlobal: 4,
                 var_bool_count: 1,
                 var_str_count: 1,
-                op_or: true,
-                op_not: true,
-                op_and: false,
+                op_logic: true,
+                op_membership: false,
+                op_comparison: false,
                 op_slice_ab: true
             }));
 
             const normalizedCode = ` ${code} `;
             expect(normalizedCode.includes(' or ') || normalizedCode.includes(' not ')).toBe(true);
-            expect(normalizedCode.includes(' and ')).toBe(false);
+        });
+
+        it("Évite les réaffectations opaques en profil opérateurs seuls au niveau 2", async () => {
+            const code = withSeededRandom(20260517, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 2,
+                numLinesGlobal: 5,
+                numTotalVariablesGlobal: 3,
+                op_logic: true,
+                op_membership: true,
+                op_comparison: true
+            }));
+
+            const normalizedCode = stripInlineComments(code);
+            const assignedNames = normalizedCode
+                .split('\n')
+                .map(line => line.trim())
+                .filter(line => /^\w+\s*=/.test(line))
+                .map(line => line.split('=')[0].trim());
+            const duplicateAssignments = assignedNames.filter((name, index) => assignedNames.indexOf(name) !== index);
+
+            expect(new Set(duplicateAssignments).size === 0).toBe(true);
+            expect(/\+=|-=/.test(normalizedCode)).toBe(false);
+        });
+
+        it("Doit garantir and, or et not au niveau 5 si op_logic est demandé", async () => {
+            const code = withSeededRandom(515151, () => generateRandomPythonCode({
+                difficultyLevelGlobal: 5,
+                numLinesGlobal: 14,
+                numTotalVariablesGlobal: 4,
+                var_bool_count: 1,
+                op_logic: true,
+                op_membership: false,
+                op_comparison: false
+            }));
+
+            const normalizedCode = ` ${stripInlineComments(code)} `;
+            expect(normalizedCode.includes(' and ')).toBe(true);
+            expect(normalizedCode.includes(' or ')).toBe(true);
+            expect(normalizedCode.includes(' not ')).toBe(true);
         });
 
         it("Ne doit pas générer d'erreurs JS sur 50 générations aléatoires", async () => {
