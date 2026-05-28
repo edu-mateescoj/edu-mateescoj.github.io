@@ -779,6 +779,215 @@ function resolveRenderedNodeId(nodeGroup, nodeSourceSpansEditor) {
     return null;
 }
 
+function splitCompactAssignmentCellText(cellText) {
+    const normalizedText = String(cellText || '').replace(/\s+/g, ' ').trim();
+    if (!normalizedText) {
+        return null;
+    }
+
+    const assignmentOperators = ['**=', '//=', '<<=', '>>=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '@=', '←', '='];
+
+    for (const operator of assignmentOperators) {
+        const spacedOperator = ` ${operator} `;
+        const operatorIndex = normalizedText.indexOf(spacedOperator);
+
+        if (operatorIndex === -1) {
+            continue;
+        }
+
+        const target = normalizedText.slice(0, operatorIndex).trim();
+        const value = normalizedText.slice(operatorIndex + spacedOperator.length).trim();
+
+        if (!target || !value) {
+            continue;
+        }
+
+        return {
+            target,
+            operator,
+            value,
+        };
+    }
+
+    return null;
+}
+
+function shouldKeepOriginalCompactAssignmentCell(assignmentParts) {
+    if (!assignmentParts) {
+        return true;
+    }
+
+    const valueText = String(assignmentParts.value || '').trim();
+    if (!valueText) {
+        return true;
+    }
+
+    if (valueText.length > 72) {
+        return true;
+    }
+
+    return false;
+}
+
+function normalizeCompactAssignmentTable(tableElement) {
+    if (!tableElement || tableElement.dataset.compactAssignmentNormalized === 'true') {
+        return 0;
+    }
+
+    const compactRows = Array.from(tableElement.querySelectorAll('tr')).filter(rowElement => {
+        const firstCell = rowElement.querySelector('td[colspan="3"], th[colspan="3"]');
+        if (!firstCell) return false;
+
+        const hasSourceAttrs = firstCell.hasAttribute('data-source-lineno')
+            || firstCell.hasAttribute('data-source-end-lineno')
+            || firstCell.hasAttribute('data-source-col-offset')
+            || firstCell.hasAttribute('data-source-end-col-offset');
+
+        return hasSourceAttrs;
+    });
+
+    if (!compactRows.length) {
+        return 0;
+    }
+
+    const parsedRows = compactRows.map(rowElement => {
+        const cellElement = rowElement.querySelector('td[colspan="3"], th[colspan="3"]');
+        const assignmentParts = splitCompactAssignmentCellText(cellElement?.textContent);
+        return {
+            rowElement,
+            cellElement,
+            assignmentParts,
+        };
+    });
+
+    const normalizableRows = parsedRows.filter(item => item.assignmentParts && !shouldKeepOriginalCompactAssignmentCell(item.assignmentParts));
+    if (!normalizableRows.length) {
+        return 0;
+    }
+
+    // La colonne gauche = maxTargetLength ch (unité = largeur du caractère '0').
+    // Toutes les lignes du bloc partagent la même valeur → les flèches s'alignent.
+    // On utilise inline-grid (pas grid) pour que chaque ligne se dimensionne à son
+    // contenu réel sans être contrainte par la largeur du foreignObject Mermaid.
+    // Si l'ensemble déborde le rect SVG, normalizeCompactAssignmentBlockLabels
+    // agrandit le rect et le foreignObject après le layout navigateur.
+    const maxTargetLength = Math.max(...normalizableRows.map(item => item.assignmentParts.target.length), 1);
+    const leftColumnWidth = `${maxTargetLength}ch`;
+
+    normalizableRows.forEach(({ cellElement, assignmentParts }) => {
+        if (!cellElement || cellElement.dataset.compactAssignmentNormalized === 'true') {
+            return;
+        }
+
+        const layoutElement = document.createElement('span');
+        layoutElement.className = 'flowchart-assignment-layout';
+        layoutElement.style.display = 'inline-grid';
+        layoutElement.style.gridTemplateColumns = `${leftColumnWidth} auto auto`;
+        layoutElement.style.alignItems = 'baseline';
+        layoutElement.style.columnGap = '0.35em';
+        layoutElement.style.whiteSpace = 'nowrap';
+
+        const targetElement = document.createElement('span');
+        targetElement.className = 'flowchart-assignment-part-target';
+        targetElement.textContent = assignmentParts.target;
+        targetElement.style.textAlign = 'right';
+        targetElement.style.justifySelf = 'end';
+        targetElement.style.whiteSpace = 'nowrap';
+
+        const operatorElement = document.createElement('span');
+        operatorElement.className = 'flowchart-assignment-part-operator';
+        operatorElement.textContent = assignmentParts.operator;
+        operatorElement.style.textAlign = 'center';
+        operatorElement.style.justifySelf = 'center';
+        operatorElement.style.whiteSpace = 'nowrap';
+
+        const valueElement = document.createElement('span');
+        valueElement.className = 'flowchart-assignment-part-value';
+        valueElement.textContent = assignmentParts.value;
+        valueElement.style.textAlign = 'left';
+        valueElement.style.justifySelf = 'start';
+        valueElement.style.whiteSpace = 'nowrap';
+
+        layoutElement.appendChild(targetElement);
+        layoutElement.appendChild(operatorElement);
+        layoutElement.appendChild(valueElement);
+
+        cellElement.textContent = '';
+        cellElement.style.textAlign = 'left';
+        cellElement.style.whiteSpace = 'nowrap';
+        cellElement.appendChild(layoutElement);
+        cellElement.dataset.compactAssignmentNormalized = 'true';
+    });
+
+    tableElement.dataset.compactAssignmentNormalized = 'true';
+    return normalizableRows.length;
+}
+
+function normalizeCompactAssignmentBlockLabels(svgElement) {
+    if (!svgElement || typeof svgElement.querySelectorAll !== 'function') {
+        return 0;
+    }
+
+    const compactCells = svgElement.querySelectorAll(
+        'foreignObject td[colspan="3"][data-source-lineno], '
+        + 'foreignObject td[colspan="3"][data-source-end-lineno], '
+        + 'foreignObject td[colspan="3"][data-source-col-offset], '
+        + 'foreignObject td[colspan="3"][data-source-end-col-offset]'
+    );
+    const processedTables = new Set();
+    const processedForeignObjects = new Set();
+    let normalizedCount = 0;
+
+    compactCells.forEach(cellElement => {
+        const tableElement = cellElement.closest('table');
+        if (!tableElement || processedTables.has(tableElement)) {
+            return;
+        }
+        processedTables.add(tableElement);
+
+        const foreignObject = cellElement.closest('foreignObject');
+        if (foreignObject) {
+            processedForeignObjects.add(foreignObject);
+        }
+
+        normalizedCount += normalizeCompactAssignmentTable(tableElement);
+    });
+
+    // Après que le navigateur a calculé le layout (inline-grid → contenu naturel),
+    // agrandir le foreignObject et le rect SVG si le contenu déborde.
+    requestAnimationFrame(() => {
+        processedForeignObjects.forEach(foreignObject => {
+            const contentDiv = foreignObject.firstElementChild;
+            if (!contentDiv) return;
+
+            const foWidth = parseFloat(foreignObject.getAttribute('width') || '0');
+            const contentWidth = contentDiv.scrollWidth;
+
+            if (contentWidth <= foWidth + 2) return; // tolérance 2px arrondi
+
+            const delta = contentWidth - foWidth;
+
+            // Agrandir le foreignObject et le recentrer
+            const foX = parseFloat(foreignObject.getAttribute('x') || '0');
+            foreignObject.setAttribute('width', String(Math.ceil(contentWidth)));
+            foreignObject.setAttribute('x', String(foX - delta / 2));
+
+            // Agrandir le rect de fond dans le même groupe Mermaid
+            const nodeGroup = foreignObject.closest('g.node');
+            if (!nodeGroup) return;
+            const rect = nodeGroup.querySelector('rect');
+            if (!rect) return;
+
+            const rectWidth = parseFloat(rect.getAttribute('width') || '0');
+            const rectX = parseFloat(rect.getAttribute('x') || '0');
+            rect.setAttribute('width', String(Math.ceil(rectWidth + delta)));
+            rect.setAttribute('x', String(rectX - delta / 2));
+        });
+    });
+
+    return normalizedCount;
+}
+
 function annotateFlowchartSvgNodes(targetDiv, svgElement) {
     if (!targetDiv || !svgElement) return;
 
@@ -974,6 +1183,7 @@ async function displayFlowchart(mermaidCode, targetDivId, nodeSourceSpansEditor 
         const svgElement = targetDiv.querySelector('svg');
 
         if (svgElement) {
+            normalizeCompactAssignmentBlockLabels(svgElement);
             annotateFlowchartSvgNodes(targetDiv, svgElement);
             bindFlowchartSelectionHandlers(targetDiv);
             svgElement.removeAttribute('height');

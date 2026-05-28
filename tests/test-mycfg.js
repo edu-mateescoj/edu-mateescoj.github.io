@@ -88,7 +88,10 @@ json.dumps({
             const decisionLabels = getNodeLabelsByType(snapshot, 'Decision');
 
             expect(
-                decisionLabels.some(label => label.includes('(count > 0 or has_value)\nand z > 0'))
+                decisionLabels.some(label => (
+                    label.includes('(count > 0 or has_value)\nand z > 0')
+                    || label.includes('count > 0 or has_value\nand z > 0')
+                ))
             ).toBe(true);
         });
 

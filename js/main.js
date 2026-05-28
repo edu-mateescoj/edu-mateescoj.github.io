@@ -1366,6 +1366,15 @@ function injectMermaidStylesIntoSvg(svg) {
          foreignObject p {
             margin: 0 !important;
         }
+            .flowchart-export-label,
+            .flowchart-export-label tspan {
+                font-family: 'Segoe UI', sans-serif !important;
+                font-size: 16px !important;
+                font-weight: 500 !important;
+                fill: #000000 !important;
+                color: #000000 !important;
+                stroke: none !important;
+            }
          foreignObject {
             overflow: visible !important;
         }
@@ -1444,6 +1453,156 @@ function insertWhiteExportBackground(svg, bbox) {
     }
 }
 
+function normalizeExportLabelText(text) {
+    return String(text || '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/[\t\r ]+/g, ' ')
+        .replace(/\n[\t\r ]+/g, '\n')
+        .trim();
+}
+
+function extractExportLabelLines(foreignObject) {
+    if (!foreignObject) return [];
+
+    const rowElements = Array.from(foreignObject.querySelectorAll('tr'));
+    if (rowElements.length > 0) {
+        const rowLines = rowElements
+            .map(rowElement => {
+                const cellTexts = Array.from(rowElement.children)
+                    .map(cellElement => normalizeExportLabelText(cellElement.innerText || cellElement.textContent))
+                    .filter(Boolean);
+                return normalizeExportLabelText(cellTexts.join(' '));
+            })
+            .filter(Boolean);
+
+        if (rowLines.length > 0) {
+            return rowLines;
+        }
+    }
+
+    const rawText = normalizeExportLabelText(
+        typeof foreignObject.innerText === 'string' && foreignObject.innerText
+            ? foreignObject.innerText
+            : foreignObject.textContent
+    );
+
+    if (!rawText) {
+        return [];
+    }
+
+    if (rawText.includes('\n')) {
+        return rawText.split(/\n+/).map(normalizeExportLabelText).filter(Boolean);
+    }
+
+    return [rawText];
+}
+
+function replaceForeignObjectWithSvgText(svg, foreignObject) {
+    if (!svg || !foreignObject) return false;
+
+    const extractedLines = extractExportLabelLines(foreignObject);
+    const fallbackLine = normalizeExportLabelText(foreignObject.textContent || '');
+    const lines = extractedLines.length
+        ? extractedLines
+        : [fallbackLine || ' '];
+    const usedFallback = extractedLines.length === 0;
+
+    const x = Number.parseFloat(foreignObject.getAttribute('x')) || 0;
+    const y = Number.parseFloat(foreignObject.getAttribute('y')) || 0;
+    const width = Number.parseFloat(foreignObject.getAttribute('width')) || 0;
+    const height = Number.parseFloat(foreignObject.getAttribute('height')) || 0;
+    const centerX = x + (width / 2);
+    const centerY = y + (height / 2);
+
+    const textElement = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    textElement.setAttribute('class', 'flowchart-export-label');
+    textElement.setAttribute('x', String(centerX));
+    textElement.setAttribute('y', String(centerY));
+    textElement.setAttribute('text-anchor', 'middle');
+    textElement.setAttribute('dominant-baseline', 'middle');
+    textElement.setAttribute('xml:space', 'preserve');
+    textElement.style.fontFamily = 'Segoe UI, sans-serif';
+    textElement.style.fontSize = '16px';
+    textElement.style.fontWeight = '500';
+    textElement.style.fill = '#000000';
+    textElement.style.stroke = 'none';
+
+    if (lines.length === 1) {
+        textElement.textContent = lines[0];
+    } else {
+        const lineHeightEm = 1.2;
+        const startDy = -((lines.length - 1) / 2) * lineHeightEm;
+
+        lines.forEach((line, index) => {
+            const tspan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
+            tspan.setAttribute('x', String(centerX));
+            tspan.setAttribute('dy', index === 0 ? `${startDy}em` : `${lineHeightEm}em`);
+            tspan.textContent = line;
+            textElement.appendChild(tspan);
+        });
+    }
+
+    foreignObject.parentNode.replaceChild(textElement, foreignObject);
+    return usedFallback ? 'fallback' : 'normal';
+}
+
+function prepareFlowchartExportSvg(svg, { addTitle = false } = {}) {
+    const clonedSvg = svg.cloneNode(true);
+    const bbox = svg.getBBox();
+
+    if (bbox && bbox.width > 0 && bbox.height > 0) {
+        clonedSvg.setAttribute('width', bbox.width);
+        clonedSvg.setAttribute('height', bbox.height);
+        clonedSvg.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
+    }
+
+    clonedSvg.removeAttribute('style');
+
+    cleanInlineMermaidStyles(clonedSvg);
+    injectMermaidStylesIntoSvg(clonedSvg);
+
+    const conversionStats = {
+        totalForeignObjects: 0,
+        converted: 0,
+        fallbackConverted: 0,
+        remainingForeignObjects: 0,
+    };
+
+    clonedSvg.querySelectorAll('foreignObject').forEach(foreignObject => {
+        conversionStats.totalForeignObjects += 1;
+        const conversionMode = replaceForeignObjectWithSvgText(clonedSvg, foreignObject);
+        if (conversionMode === 'normal') {
+            conversionStats.converted += 1;
+        } else if (conversionMode === 'fallback') {
+            conversionStats.converted += 1;
+            conversionStats.fallbackConverted += 1;
+        }
+    });
+
+    conversionStats.remainingForeignObjects = clonedSvg.querySelectorAll('foreignObject').length;
+
+    if (conversionStats.remainingForeignObjects > 0) {
+        console.warn('Export SVG: foreignObject restants apres conversion.', conversionStats);
+    }
+
+    insertWhiteExportBackground(clonedSvg, bbox);
+
+    if (addTitle) {
+        const now = new Date();
+        const timestamp = now.toLocaleString();
+        const titleText = `Logigramme généré le ${timestamp}`;
+
+        let titleEl = clonedSvg.querySelector('title');
+        if (!titleEl) {
+            titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+            clonedSvg.insertBefore(titleEl, clonedSvg.firstChild);
+        }
+        titleEl.textContent = titleText;
+    }
+
+    return { clonedSvg, bbox, conversionStats };
+}
+
 /**
  * Exporte le diagramme Mermaid actuel (#flowchart) en PNG
  * avec une taille "document-friendly":
@@ -1488,17 +1647,10 @@ async function exportFlowchartAsPng() {
     const exportHeight = Math.round(diagramHeight * scale * DPI_SCALE);
 
 
-    // 3. Cloner le SVG pour l'export
-    const clonedSvg = svg.cloneNode(true);
+    // 3. Préparer un SVG exportable (texte natif pour les éditeurs SVG)
+    const { clonedSvg } = prepareFlowchartExportSvg(svg);
     clonedSvg.setAttribute('width',  exportWidth / DPI_SCALE);
     clonedSvg.setAttribute('height', exportHeight / DPI_SCALE);
-    clonedSvg.setAttribute(
-        'viewBox',
-        `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
-    );
-    cleanInlineMermaidStyles(clonedSvg);
-    injectMermaidStylesIntoSvg(clonedSvg);
-    insertWhiteExportBackground(clonedSvg, bbox);
 
     // Nettoyer d'éventuels <image href="http://..."> qui repollueraient le canvas
     const images = clonedSvg.querySelectorAll('image');
@@ -1584,36 +1736,14 @@ function exportFlowchartAsSvg() {
         return;
     }
 
-    // 1. Cloner le SVG pour ne pas toucher à l'original
-    const clonedSvg = svg.cloneNode(true);
-    const bbox = svg.getBBox();
+    // 1. Préparer un SVG exportable (texte natif pour les éditeurs SVG)
+    const { clonedSvg, conversionStats } = prepareFlowchartExportSvg(svg, { addTitle: true });
 
-    if (bbox && bbox.width > 0 && bbox.height > 0) {
-        clonedSvg.setAttribute('width', bbox.width);
-        clonedSvg.setAttribute('height', bbox.height);
-        clonedSvg.setAttribute('viewBox', `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`);
+    if (conversionStats && conversionStats.totalForeignObjects > 0) {
+        console.info('Export SVG: resume conversion des labels HTML vers texte SVG.', conversionStats);
     }
 
-    clonedSvg.removeAttribute('style');
-
-    // 2. Injecter les styles Mermaid calculés (mêmes couleurs que l’UI)
-    cleanInlineMermaidStyles(clonedSvg);
-    injectMermaidStylesIntoSvg(clonedSvg);
-    insertWhiteExportBackground(clonedSvg, bbox);
-
-    // 3. Ajouter un <title> avec date/heure (métadonnée interne)
-    const now = new Date();
-    const timestamp = now.toLocaleString(); // ex. "07/12/2025, 14:32:10"
-    const titleText = `Logigramme généré le ${timestamp}`;
-
-    let titleEl = clonedSvg.querySelector('title');
-    if (!titleEl) {
-        titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-        clonedSvg.insertBefore(titleEl, clonedSvg.firstChild);
-    }
-    titleEl.textContent = titleText;
-
-    // 4. Sérialiser et télécharger
+    // 2. Sérialiser et télécharger
     const serializer = new XMLSerializer();
     let svgString = serializer.serializeToString(clonedSvg);
     if (!svgString.startsWith('<?xml')) {
@@ -1626,6 +1756,7 @@ function exportFlowchartAsSvg() {
     a.href = url;
 
     // Nom de fichier avec date / heure (même logique que le PNG)
+    const now = new Date();
     const yyyy = now.getFullYear();
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const dd = String(now.getDate()).padStart(2, '0');

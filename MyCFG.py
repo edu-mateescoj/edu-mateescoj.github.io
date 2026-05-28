@@ -500,7 +500,7 @@ class ControlFlowGraph:
     
     def visit_If(self, node: ast.If, parent_id: str) -> List[str]:
         """Visite une instruction 'if' AST."""
-        condition_text = ast.unparse(node.test).replace('"', '"') # Remplacer les guillemets pour Mermaid.
+        condition_text = self._format_decision_test_label(node.test).replace('"', '"') # Remplacer les guillemets pour Mermaid.
         if_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node.test)
         self.add_edge(parent_id, if_decision_id)
 
@@ -763,22 +763,27 @@ class ControlFlowGraph:
         """
         _ = iterator_variable_str
         return self.visit_For(node, parent_id)
+
+    def _format_decision_test_label(self, test_node: ast.AST) -> str:
+        """Formate les tests booléens en lignes compactes pour mieux occuper les losanges."""
+        if isinstance(test_node, ast.BoolOp) and len(test_node.values) > 1:
+            operator_text = "and" if isinstance(test_node.op, ast.And) else "or"
+            lines: List[str] = []
+
+            for index, value_node in enumerate(test_node.values):
+                value_text = ast.unparse(value_node)
+                if index == 0:
+                    lines.append(value_text)
+                else:
+                    lines.append(f"{operator_text} {value_text}")
+
+            return "\n".join(lines)
+
+        return ast.unparse(test_node)
     
     def visit_While(self, node: ast.While, parent_id: str) -> List[str]: 
         """Visite une boucle 'while' AST."""
-        if isinstance(node.test, ast.BoolOp) and len(node.test.values) > 1:
-            leading_values = node.test.values[:-1]
-            trailing_value = node.test.values[-1]
-            if len(leading_values) == 1:
-                first_line = ast.unparse(leading_values[0])
-                if isinstance(leading_values[0], ast.BoolOp):
-                    first_line = f"({first_line})"
-            else:
-                first_line = ast.unparse(ast.BoolOp(op=node.test.op, values=leading_values))
-            final_operator = "and" if isinstance(node.test.op, ast.And) else "or"
-            condition_text = f"{first_line}\n{final_operator} {ast.unparse(trailing_value)}"
-        else:
-            condition_text = ast.unparse(node.test)
+        condition_text = self._format_decision_test_label(node.test)
         condition_text = condition_text.replace('"', '"')
         while_decision_id = self.add_node(f"{condition_text}", node_type="Decision", source_start_node=node.test)
         self.add_edge(parent_id, while_decision_id)

@@ -147,13 +147,27 @@
 #flowchart svg .node .nodeLabel,
 #flowchart svg .cluster text,
 #flowchart svg .edgeLabel,
-#flowchart svg foreignObject div {
+#flowchart svg foreignObject div,
+#flowchart svg foreignObject table,
+#flowchart svg foreignObject tbody,
+#flowchart svg foreignObject tr,
+#flowchart svg foreignObject td,
+#flowchart svg foreignObject th,
+#flowchart svg foreignObject span,
+#flowchart svg foreignObject p {
     font-family: 'Segoe UI', sans-serif !important;
     font-size: 18px !important; /* Beaucoup plus grand pour la lisibilité */
     font-weight: 500;
     color: var(--mermaid-text) !important;
     stroke: var(--mermaid-line) !important;
     line-height: 1.4;
+}
+
+#flowchart svg foreignObject * {
+    color: var(--mermaid-text) !important;
+    fill: var(--mermaid-text) !important;
+    stroke: none !important;
+    background: transparent !important;
 }
 
 /* Formes (Rectangles, Losanges) */
@@ -181,7 +195,22 @@
 
 #flowchart svg g.node.flowchart-node-selected .label,
 #flowchart svg g.node.flowchart-node-selected .nodeLabel,
-#flowchart svg g.node.flowchart-node-selected foreignObject div {
+#flowchart svg g.node.flowchart-node-selected foreignObject div,
+#flowchart svg g.node.flowchart-node-selected foreignObject table,
+#flowchart svg g.node.flowchart-node-selected foreignObject tbody,
+#flowchart svg g.node.flowchart-node-selected foreignObject tr,
+#flowchart svg g.node.flowchart-node-selected foreignObject td,
+#flowchart svg g.node.flowchart-node-selected foreignObject th,
+#flowchart svg g.node.flowchart-node-selected foreignObject span,
+#flowchart svg g.node.flowchart-node-selected foreignObject p,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject div,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject table,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject tbody,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject tr,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject td,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject th,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject span,
+#flowchart svg g.node.flowchart-node-row-selected foreignObject p {
     color: var(--selection-accent) !important;
     fill: var(--selection-accent) !important;
     stroke: transparent !important;

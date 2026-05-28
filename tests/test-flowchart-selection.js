@@ -202,6 +202,151 @@ document.addEventListener('DOMContentLoaded', () => {
             targetDiv.remove();
         });
 
+        it('Recentre visuellement une affectation compacte sans casser la sélection de ligne', async () => {
+            const targetDiv = document.createElement('div');
+            targetDiv.innerHTML = `
+                <svg>
+                    <g class="node" data-node-id="node02" data-editor-line="0" data-editor-end-line="0" data-lineno="1" data-end-lineno="1" data-col-offset="0" data-end-col-offset="14">
+                        <foreignObject>
+                            <div xmlns="http://www.w3.org/1999/xhtml">
+                                <table>
+                                    <tbody>
+                                        <tr data-source-lineno="1" data-source-end-lineno="1" data-source-col-offset="0" data-source-end-col-offset="14">
+                                            <td class="compact-cell" colspan="3" data-source-lineno="1" data-source-end-lineno="1" data-source-col-offset="0" data-source-end-col-offset="14">prefix ← value</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </foreignObject>
+                    </g>
+                </svg>
+            `;
+            document.body.appendChild(targetDiv);
+
+            const svgElement = targetDiv.querySelector('svg');
+            const normalizedCount = normalizeCompactAssignmentBlockLabels(svgElement);
+            const compactCell = targetDiv.querySelector('.compact-cell');
+
+            expect(normalizedCount).toBe(1);
+            expect(targetDiv.querySelectorAll('td').length).toBe(1);
+            expect(compactCell.dataset.compactAssignmentNormalized).toBe('true');
+            expect(targetDiv.querySelector('.flowchart-assignment-layout')).toBeDefined();
+            expect(targetDiv.querySelector('.flowchart-assignment-part-target').textContent).toBe('prefix');
+            expect(targetDiv.querySelector('.flowchart-assignment-part-operator').textContent).toBe('←');
+            expect(targetDiv.querySelector('.flowchart-assignment-part-value').textContent).toBe('value');
+
+            let currentEditorSelection = null;
+            window.selectEditorSourceRange = function(sourceSpan) {
+                currentEditorSelection = sourceSpan;
+            };
+            window.clearEditorSourceSelection = function() {
+                currentEditorSelection = null;
+            };
+            window.__selectedFlowchartNodeId = null;
+
+            bindFlowchartSelectionHandlers(targetDiv);
+
+            targetDiv.querySelector('.flowchart-assignment-part-operator').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+            expect(currentEditorSelection).toBeDefined();
+            expect(currentEditorSelection.lineno).toBe(1);
+            expect(targetDiv.querySelector('g.node.flowchart-node-row-selected').dataset.nodeId).toBe('node02');
+            expect(targetDiv.querySelectorAll('.flowchart-row-selected-cell').length).toBe(1);
+
+            targetDiv.remove();
+        });
+
+        it('Aligne verticalement les flèches d un bloc compact selon la variable la plus longue', async () => {
+            const targetDiv = document.createElement('div');
+            targetDiv.innerHTML = `
+                <svg>
+                    <g class="node" data-node-id="node04" data-editor-line="0" data-editor-end-line="2" data-lineno="1" data-end-lineno="3" data-col-offset="0" data-end-col-offset="24">
+                        <foreignObject>
+                            <div xmlns="http://www.w3.org/1999/xhtml">
+                                <table>
+                                    <tbody>
+                                        <tr data-source-lineno="1" data-source-end-lineno="1" data-source-col-offset="0" data-source-end-col-offset="10">
+                                            <td colspan="3" data-source-lineno="1" data-source-end-lineno="1" data-source-col-offset="0" data-source-end-col-offset="10">x ← 5</td>
+                                        </tr>
+                                        <tr data-source-lineno="2" data-source-end-lineno="2" data-source-col-offset="0" data-source-end-col-offset="16">
+                                            <td colspan="3" data-source-lineno="2" data-source-end-lineno="2" data-source-col-offset="0" data-source-end-col-offset="16">long_name ← 10</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </foreignObject>
+                    </g>
+                </svg>
+            `;
+            document.body.appendChild(targetDiv);
+
+            const normalizedCount = normalizeCompactAssignmentBlockLabels(targetDiv.querySelector('svg'));
+            const layouts = Array.from(targetDiv.querySelectorAll('.flowchart-assignment-layout'));
+
+            expect(normalizedCount).toBe(2);
+            expect(layouts.length).toBe(2);
+            // Les deux lignes du bloc partagent la même colonne gauche (alignement vertical des flèches)
+            expect(layouts[0].style.gridTemplateColumns).toBe(layouts[1].style.gridTemplateColumns);
+            // La colonne gauche est exprimée en ch, calibrée sur la variable la plus longue du bloc
+            const leftCol = layouts[0].style.gridTemplateColumns.split(' ')[0];
+            expect(leftCol.endsWith('ch')).toBe(true);
+            // La colonne gauche doit être plus large que celle qu'on aurait calculée pour 'x' seul
+            const leftColValue = parseFloat(leftCol);
+            expect(leftColValue).toBeGreaterThan(1);
+
+            targetDiv.remove();
+        });
+
+        it('Conserve le rendu compact original pour une valeur vraiment trop longue', async () => {
+            const targetDiv = document.createElement('div');
+            targetDiv.innerHTML = `
+                <svg>
+                    <g class="node" data-node-id="node03" data-editor-line="0" data-editor-end-line="0" data-lineno="1" data-end-lineno="1" data-col-offset="0" data-end-col-offset="29">
+                        <foreignObject>
+                            <div xmlns="http://www.w3.org/1999/xhtml">
+                                <table>
+                                    <tbody>
+                                        <tr data-source-lineno="1" data-source-end-lineno="1" data-source-col-offset="0" data-source-end-col-offset="29">
+                                            <td class="compact-list-cell" colspan="3" data-source-lineno="1" data-source-end-lineno="1" data-source-col-offset="0" data-source-end-col-offset="29">values ← [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500]</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </foreignObject>
+                    </g>
+                </svg>
+            `;
+            document.body.appendChild(targetDiv);
+
+            const svgElement = targetDiv.querySelector('svg');
+            const normalizedCount = normalizeCompactAssignmentBlockLabels(svgElement);
+            const compactCell = targetDiv.querySelector('.compact-list-cell');
+
+            expect(normalizedCount).toBe(0);
+            expect(compactCell.dataset.compactAssignmentNormalized).toBe(undefined);
+            expect(compactCell.textContent.includes('[100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500]')).toBe(true);
+            expect(targetDiv.querySelector('.flowchart-assignment-layout')).toBe(null);
+
+            let currentEditorSelection = null;
+            window.selectEditorSourceRange = function(sourceSpan) {
+                currentEditorSelection = sourceSpan;
+            };
+            window.clearEditorSourceSelection = function() {
+                currentEditorSelection = null;
+            };
+            window.__selectedFlowchartNodeId = null;
+
+            bindFlowchartSelectionHandlers(targetDiv);
+            compactCell.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+            expect(currentEditorSelection).toBeDefined();
+            expect(currentEditorSelection.lineno).toBe(1);
+            expect(targetDiv.querySelector('g.node.flowchart-node-row-selected').dataset.nodeId).toBe('node03');
+            expect(targetDiv.querySelectorAll('.flowchart-row-selected-cell').length).toBe(1);
+
+            targetDiv.remove();
+        });
+
         it('Sélectionne la bonne ligne du logigramme depuis une ligne CodeMirror décalée', async () => {
             const targetDiv = document.createElement('div');
             targetDiv.innerHTML = `
